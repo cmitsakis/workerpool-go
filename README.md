@@ -38,7 +38,7 @@ import (
 func main() {
 	results := make(chan float64)
 	p, err := workerpool.NewPoolSimple(4, func(job workerpool.Job[float64], workerID int) error {
-		results <- job.Payload * job.Payload
+		results <- math.Sqrt(job.Payload)
 		return nil
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func main() {
 		}
 	}()
 	for i := 0; i < 100; i++ {
-		p.Submit(i)
+		p.Submit(float64(i))
 	}
 	p.StopAndWait()
 }

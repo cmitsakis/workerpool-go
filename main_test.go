@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 func TestExample(t *testing.T) {
 	results := make(chan float64)
 	p, err := NewPoolSimple(4, func(job Job[float64], workerID int) error {
-		results <- job.Payload * job.Payload
+		results <- math.Sqrt(job.Payload)
 		return nil
 	}, LoggerInfo(log.Default()), LoggerDebug(log.Default()))
 	if err != nil {
