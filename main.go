@@ -287,8 +287,8 @@ type worker[P, C any] struct {
 
 func newWorker[P, C any](p *Pool[P, C], id int) *worker[P, C] {
 	return &worker[P, C]{
-		id:      id,
-		pool:    p,
+		id:   id,
+		pool: p,
 	}
 }
 
