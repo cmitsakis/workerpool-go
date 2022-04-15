@@ -142,7 +142,7 @@ func (p *Pool[P, C]) loop() {
 			// concurrency > 0 so we can divide
 			loadNow := float64(nJobsInSystem) / float64(concurrency)
 			const a = 0.1
-			loadAvg = a*float64(loadNow) + (1-a)*float64(loadAvg)
+			loadAvg = a*loadNow + (1-a)*loadAvg
 			if p.loggerDebug != nil {
 				nJobsProcessing := atomic.LoadInt32(&p.nJobsProcessing)
 				if jobDone {
