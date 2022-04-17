@@ -23,6 +23,7 @@ type Pool[P any, C any] struct {
 	retries          int
 	retryDelay       time.Duration
 	idleTimeout      time.Duration
+	targetLoad       float64
 	loggerInfo       *log.Logger
 	loggerDebug      *log.Logger
 	handler          func(job Job[P], workerID int, connection C) error
@@ -43,6 +44,7 @@ type poolConfig struct {
 	retries     int
 	retryDelay  time.Duration
 	idleTimeout time.Duration
+	targetLoad  float64
 	loggerInfo  *log.Logger
 	loggerDebug *log.Logger
 }
@@ -64,6 +66,18 @@ func RetryDelay(d time.Duration) func(c *poolConfig) error {
 func IdleTimeout(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.idleTimeout = d
+		return nil
+	}
+}
+
+func TargetLoad(v float64) func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		if v > 1 {
+			return fmt.Errorf("TargetLoad() invalid argument (v > 1)")
+		} else if v <= 0 {
+			return fmt.Errorf("TargetLoad() invalid argument (v <= 0)")
+		}
+		c.targetLoad = v
 		return nil
 	}
 }
@@ -94,6 +108,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 	config := poolConfig{
 		retryDelay:  time.Second,
 		idleTimeout: 20 * time.Second,
+		targetLoad:  0.9,
 	}
 	for _, option := range options {
 		err := option(&config)
@@ -105,6 +120,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 		retries:          config.retries,
 		retryDelay:       config.retryDelay,
 		idleTimeout:      config.idleTimeout,
+		targetLoad:       config.targetLoad,
 		loggerInfo:       config.loggerInfo,
 		loggerDebug:      config.loggerDebug,
 		maxActiveWorkers: maxActiveWorkers,
@@ -153,15 +169,15 @@ func (p *Pool[P, C]) loop() {
 			}
 		}
 		if concurrency > 0 && jobDone {
-			if loadAvg < 0.9*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > 20 {
+			if loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > 20 {
 				// if load is low and we didn't disable a worker recently, disable n workers
 				// n = number of workers we should disable
 				// find n such that:
-				// loadAvg > 0.9*(concurrency-n)/concurrency
-				// loadAvg*concurrency/0.9 > concurrency-n
-				// n + loadAvg*concurrency/0.9 > concurrency
-				// n > concurrency - loadAvg*concurrency/0.9
-				n := int(float64(concurrency) - loadAvg*float64(concurrency)/0.9)
+				// loadAvg > p.targetLoad*(concurrency-n)/concurrency
+				// loadAvg*concurrency/p.targetLoad > concurrency-n
+				// n + loadAvg*concurrency/p.targetLoad > concurrency
+				// n > concurrency - loadAvg*concurrency/p.targetLoad
+				n := int(float64(concurrency) - loadAvg*float64(concurrency)/p.targetLoad)
 				if int(concurrency)-n <= 0 {
 					n = int(concurrency) - 1
 				}
