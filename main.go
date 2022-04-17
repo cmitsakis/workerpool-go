@@ -7,6 +7,7 @@ package workerpool
 import (
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -148,6 +149,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 func (p *Pool[P, C]) loop() {
 	var loadAvg float64 = 1
 	var jobID int
+	var jobIDWhenLastEnabledWorker int
 	var doneCounter int
 	var doneCounterWhenLastDisabledWorker int
 	var nJobsInSystem int
@@ -166,6 +168,29 @@ func (p *Pool[P, C]) loop() {
 				} else {
 					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f jobID=%d\n", len(p.jobsNew), len(p.jobsQueue), nJobsProcessing, nJobsInSystem, concurrency, loadAvg, jobID)
 				}
+			}
+		}
+		if !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 {
+			// if load is high and we haven't enabled a worker recently, enable n workers
+			// n = number of workers we should enable
+			// find n such that:
+			// loadAvg < p.targetLoad*(concurrency+n)/concurrency
+			// loadAvg*concurrency/p.targetLoad < concurrency+n
+			// loadAvg*concurrency/p.targetLoad - concurrency < n
+			// calculate square root to keep n low if loadAvg is high (otherwise we might enable too many workers)
+			n := int(math.Sqrt(loadAvg*float64(concurrency)/p.targetLoad - float64(concurrency)))
+			if n > 0 {
+				if p.loggerDebug != nil {
+					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
+				}
+				// try to enable n workers.
+				for i := 0; i < n; i++ {
+					select {
+					case p.enableWorker <- struct{}{}:
+					default:
+					}
+				}
+				jobIDWhenLastEnabledWorker = jobID
 			}
 		}
 		if concurrency > 0 && jobDone {
