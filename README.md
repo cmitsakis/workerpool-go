@@ -32,6 +32,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"go.mitsakis.org/workerpool"
 )
 
@@ -42,12 +43,12 @@ func main() {
 		return nil
 	})
 	if err != nil {
-		log.Printf("NewPoolSimple() failed: %s", err)
+		fmt.Printf("NewPoolSimple() failed: %s", err)
 		return
 	}
 	go func() {
 		for result := range results {
-			log.Println("result:", result)
+			fmt.Println("result:", result)
 		}
 	}()
 	for i := 0; i < 100; i++ {
