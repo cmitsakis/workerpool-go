@@ -2,8 +2,10 @@
 
 Generic worker pool with limited concurrency, backpressure, and dynamically resizable number of workers.
 
-The pool includes a queue with limited capacity. If too many jobs are submitted, submissions block and a new worker is started (if available).
+The pool includes a queue with limited capacity.
+If too many jobs are submitted and the queue is full, submissions block.
 
+If too many jobs are in queue, new workers are started (if available).
 If there are more active workers than needed some workers are stopped.
 
 Notable differences from other worker pool libraries:
