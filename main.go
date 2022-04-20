@@ -25,6 +25,7 @@ type Pool[P any, C any] struct {
 	retryDelay       time.Duration
 	idleTimeout      time.Duration
 	targetLoad       float64
+	name             string
 	loggerInfo       *log.Logger
 	loggerDebug      *log.Logger
 	handler          func(job Job[P], workerID int, connection C) error
@@ -46,6 +47,7 @@ type poolConfig struct {
 	retryDelay  time.Duration
 	idleTimeout time.Duration
 	targetLoad  float64
+	name        string
 	loggerInfo  *log.Logger
 	loggerDebug *log.Logger
 }
@@ -79,6 +81,14 @@ func TargetLoad(v float64) func(c *poolConfig) error {
 			return fmt.Errorf("TargetLoad() invalid argument (v <= 0)")
 		}
 		c.targetLoad = v
+		return nil
+	}
+}
+
+// Name sets the name of the pool
+func Name(s string) func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		c.name = s
 		return nil
 	}
 }
@@ -117,13 +127,32 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 			return nil, fmt.Errorf("config error: %s", err)
 		}
 	}
+
+	var loggerInfo *log.Logger
+	if config.loggerInfo != nil {
+		if config.name == "" {
+			loggerInfo = config.loggerInfo
+		} else {
+			loggerInfo = log.New(config.loggerInfo.Writer(), config.loggerInfo.Prefix()+"[pool="+config.name+"] ", config.loggerInfo.Flags() | log.Lmsgprefix)
+		}
+	}
+	var loggerDebug *log.Logger
+	if config.loggerDebug != nil {
+		if config.name == "" {
+			loggerDebug = config.loggerDebug
+		} else {
+			loggerDebug = log.New(config.loggerDebug.Writer(), config.loggerDebug.Prefix()+"[pool="+config.name+"] ", config.loggerDebug.Flags() | log.Lmsgprefix)
+		}
+	}
+
 	p := Pool[P, C]{
 		retries:          config.retries,
 		retryDelay:       config.retryDelay,
 		idleTimeout:      config.idleTimeout,
 		targetLoad:       config.targetLoad,
-		loggerInfo:       config.loggerInfo,
-		loggerDebug:      config.loggerDebug,
+		name:             config.name,
+		loggerInfo:       loggerInfo,
+		loggerDebug:      loggerDebug,
 		maxActiveWorkers: maxActiveWorkers,
 		handler:          handler,
 		workerInit:       workerInit,
