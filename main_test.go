@@ -132,6 +132,63 @@ func TestPoolFull(t *testing.T) {
 	log.Println("[test] p.StopAndWait() returned")
 }
 
+func TestMultiplePools(t *testing.T) {
+	const inputPeriod = 10 * time.Millisecond
+	const jobDur1 = 250 * time.Millisecond
+	const jobDur2 = 500 * time.Millisecond
+
+	results := make(chan float64)
+	p1, err := NewPoolSimple(100, func(job Job[float64], workerID int) error {
+		time.Sleep(jobDur1)
+		results <- math.Sqrt(job.Payload)
+		return nil
+	}, Name("p1"), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
+	if err != nil {
+		log.Printf("NewPoolSimple() failed: %s", err)
+		return
+	}
+
+	results2 := make(chan float64)
+	p2, err := NewPoolSimple(100, func(job Job[float64], workerID int) error {
+		time.Sleep(jobDur2)
+		results2 <- -job.Payload
+		return nil
+	}, Name("p2"), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
+	if err != nil {
+		log.Printf("NewPoolSimple() failed: %s", err)
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel()
+		for i := 0; i < 10000; i++ {
+			if sleepCtx(ctx, inputPeriod) {
+				break
+			}
+			log.Printf("[test] submitting job%d\n", i)
+			p1.Submit(float64(i))
+		}
+		log.Println("[test] submitted jobs - calling p1.StopAndWait()")
+		p1.StopAndWait()
+		close(results)
+	}()
+
+	go func() {
+		for result := range results {
+			log.Println("intermediate result:", result)
+			p2.Submit(result)
+		}
+		log.Println("[test] submitted jobs - calling p2.StopAndWait()")
+		p2.StopAndWait()
+		close(results2)
+	}()
+
+	for result := range results2 {
+		log.Println("result:", result)
+	}
+}
+
 func sleepCtx(ctx context.Context, dur time.Duration) bool {
 	ticker := time.NewTicker(dur)
 	defer ticker.Stop()
