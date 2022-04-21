@@ -133,7 +133,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 		if config.name == "" {
 			loggerInfo = config.loggerInfo
 		} else {
-			loggerInfo = log.New(config.loggerInfo.Writer(), config.loggerInfo.Prefix()+"[pool="+config.name+"] ", config.loggerInfo.Flags() | log.Lmsgprefix)
+			loggerInfo = log.New(config.loggerInfo.Writer(), config.loggerInfo.Prefix()+"[pool="+config.name+"] ", config.loggerInfo.Flags()|log.Lmsgprefix)
 		}
 	}
 	var loggerDebug *log.Logger
@@ -141,7 +141,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 		if config.name == "" {
 			loggerDebug = config.loggerDebug
 		} else {
-			loggerDebug = log.New(config.loggerDebug.Writer(), config.loggerDebug.Prefix()+"[pool="+config.name+"] ", config.loggerDebug.Flags() | log.Lmsgprefix)
+			loggerDebug = log.New(config.loggerDebug.Writer(), config.loggerDebug.Prefix()+"[pool="+config.name+"] ", config.loggerDebug.Flags()|log.Lmsgprefix)
 		}
 	}
 
