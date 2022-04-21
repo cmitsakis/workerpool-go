@@ -52,6 +52,7 @@ type poolConfig struct {
 	loggerDebug *log.Logger
 }
 
+// Retries sets the number of times a job will be retried if it fails.
 func Retries(n int) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.retries = n
@@ -59,6 +60,7 @@ func Retries(n int) func(c *poolConfig) error {
 	}
 }
 
+// ReinitDelay sets the time duration the worker should wait before reattempting init after failure.
 func ReinitDelay(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.reinitDelay = d
@@ -66,6 +68,7 @@ func ReinitDelay(d time.Duration) func(c *poolConfig) error {
 	}
 }
 
+// IdleTimeout sets the time duration after which an idle worker is stopped.
 func IdleTimeout(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.idleTimeout = d
@@ -73,6 +76,14 @@ func IdleTimeout(d time.Duration) func(c *poolConfig) error {
 	}
 }
 
+// TargetLoad sets the target load of the pool.
+//
+// load = n / c,
+// where n = number of jobs in queue or processing,
+// and c = concurrency (current number of started workers).
+//
+// If load is higher than target load, new workers are started.
+// If it's lower, some workers are stopped.
 func TargetLoad(v float64) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		if v > 1 {
@@ -85,7 +96,7 @@ func TargetLoad(v float64) func(c *poolConfig) error {
 	}
 }
 
-// Name sets the name of the pool
+// Name sets the name of the pool.
 func Name(s string) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.name = s
@@ -93,6 +104,7 @@ func Name(s string) func(c *poolConfig) error {
 	}
 }
 
+// LoggerInfo sets a logger for info level logging.
 func LoggerInfo(l *log.Logger) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.loggerInfo = l
@@ -100,6 +112,7 @@ func LoggerInfo(l *log.Logger) func(c *poolConfig) error {
 	}
 }
 
+// LoggerDebug sets a logger for debug level logging.
 func LoggerDebug(l *log.Logger) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.loggerDebug = l
@@ -107,6 +120,7 @@ func LoggerDebug(l *log.Logger) func(c *poolConfig) error {
 	}
 }
 
+// NewPoolSimple creates a new worker pool.
 func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerID int) error, options ...func(*poolConfig) error) (*Pool[P, struct{}], error) {
 	handler2 := func(job Job[P], workerID int, connection struct{}) error {
 		return handler(job, workerID)
@@ -114,6 +128,7 @@ func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerI
 	return NewPoolWithInit[P, struct{}](maxActiveWorkers, handler2, nil, nil, options...)
 }
 
+// NewPoolWithInit creates a new worker pool with workerInit() and workerDeinit() functions.
 func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) error, workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, C], error) {
 	// default configuration
 	config := poolConfig{
