@@ -331,6 +331,7 @@ func (p *Pool[P, C]) loop() {
 	}
 }
 
+// Submit adds a new job to the queue.
 func (p *Pool[P, C]) Submit(jobPayload P) {
 	p.wgJobs.Add(1)
 	select {
@@ -347,6 +348,9 @@ func (p *Pool[P, C]) Submit(jobPayload P) {
 	}
 }
 
+// StopAndWait shuts down the pool.
+// Once called no more jobs can be submitted,
+// and waits for all enqueued jobs to finish and workers to stop.
 func (p *Pool[P, C]) StopAndWait() {
 	close(p.jobsNew)
 	if p.loggerDebug != nil {
