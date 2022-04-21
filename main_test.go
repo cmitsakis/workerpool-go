@@ -24,16 +24,18 @@ func TestExample(t *testing.T) {
 		return
 	}
 	go func() {
-		for result := range results {
-			log.Println("result:", result)
+		for i := 0; i < 100; i++ {
+			log.Printf("[test] submitting job%d\n", i)
+			p.Submit(float64(i))
 		}
+		log.Println("[test] submitted jobs - calling p.StopAndWait()")
+		p.StopAndWait()
+		log.Println("[test] p.StopAndWait() returned")
+		close(results)
 	}()
-	for i := 0; i < 100; i++ {
-		log.Printf("[test] submitting job%d\n", i)
-		p.Submit(float64(i))
+	for result := range results {
+		log.Println("result:", result)
 	}
-	log.Println("[test] submitted jobs - calling p.StopAndWait()")
-	p.StopAndWait()
 }
 
 func TestPoolSimple(t *testing.T) {
@@ -50,31 +52,32 @@ func TestPoolSimple(t *testing.T) {
 		log.Printf("NewPoolSimple() failed: %s", err)
 	}
 	go func() {
-		const a = 0.1
-		var outputPeriodAvg time.Duration
-		lastReceived := time.Now()
-		for range results {
-			outputPeriod := time.Since(lastReceived)
-			lastReceived = time.Now()
-			outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
-			log.Println("[test] outputPeriodAvg:", outputPeriodAvg)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel()
+	loop:
+		for i := 0; i < 100000; i++ {
+			select {
+			case <-ctx.Done():
+				break loop
+			default:
+			}
+			log.Printf("[test] submitting job%d\n", i)
+			p.Submit(i)
 		}
+		log.Println("[test] submitted jobs - calling p.StopAndWait()")
+		p.StopAndWait()
+		log.Println("[test] p.StopAndWait() returned")
+		close(results)
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
-loop:
-	for i := 0; i < 100000; i++ {
-		select {
-		case <-ctx.Done():
-			break loop
-		default:
-		}
-		log.Printf("[test] submitting job%d\n", i)
-		p.Submit(i)
+	const a = 0.1
+	var outputPeriodAvg time.Duration
+	lastReceived := time.Now()
+	for range results {
+		outputPeriod := time.Since(lastReceived)
+		lastReceived = time.Now()
+		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
+		log.Println("[test] outputPeriodAvg:", outputPeriodAvg)
 	}
-	log.Println("[test] submitted jobs - calling p.StopAndWait()")
-	p.StopAndWait()
-	log.Println("[test] p.StopAndWait() returned")
 }
 
 func TestPoolFull(t *testing.T) {
@@ -108,28 +111,29 @@ func TestPoolFull(t *testing.T) {
 		log.Printf("NewPool() failed: %s", err)
 	}
 	go func() {
-		const a = 0.1
-		var outputPeriodAvg time.Duration
-		lastReceived := time.Now()
-		for range results {
-			outputPeriod := time.Since(lastReceived)
-			lastReceived = time.Now()
-			outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
-			log.Println("[test] outputPeriodAvg:", outputPeriodAvg)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel()
+		for i := 0; i < 100000; i++ {
+			if sleepCtx(ctx, inputPeriod) {
+				break
+			}
+			log.Printf("[test] submitting job%d\n", i)
+			p.Submit(i)
 		}
+		log.Println("[test] submitted jobs - calling p.StopAndWait()")
+		p.StopAndWait()
+		log.Println("[test] p.StopAndWait() returned")
+		close(results)
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
-	for i := 0; i < 100000; i++ {
-		if sleepCtx(ctx, inputPeriod) {
-			break
-		}
-		log.Printf("[test] submitting job%d\n", i)
-		p.Submit(i)
+	const a = 0.1
+	var outputPeriodAvg time.Duration
+	lastReceived := time.Now()
+	for range results {
+		outputPeriod := time.Since(lastReceived)
+		lastReceived = time.Now()
+		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
+		log.Println("[test] outputPeriodAvg:", outputPeriodAvg)
 	}
-	log.Println("[test] submitted jobs - calling p.StopAndWait()")
-	p.StopAndWait()
-	log.Println("[test] p.StopAndWait() returned")
 }
 
 func TestMultiplePools(t *testing.T) {

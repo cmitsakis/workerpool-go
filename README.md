@@ -49,14 +49,15 @@ func main() {
 		return
 	}
 	go func() {
-		for result := range results {
-			fmt.Println("result:", result)
+		for i := 0; i < 100; i++ {
+			p.Submit(float64(i))
 		}
+		p.StopAndWait()
+		close(results)
 	}()
-	for i := 0; i < 100; i++ {
-		p.Submit(float64(i))
+	for result := range results {
+		fmt.Println("result:", result)
 	}
-	p.StopAndWait()
 }
 ```
 
