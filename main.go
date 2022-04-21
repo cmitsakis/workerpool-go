@@ -22,7 +22,7 @@ type Job[P any] struct {
 type Pool[P any, C any] struct {
 	maxActiveWorkers int
 	retries          int
-	retryDelay       time.Duration
+	reinitDelay      time.Duration
 	idleTimeout      time.Duration
 	targetLoad       float64
 	name             string
@@ -44,7 +44,7 @@ type Pool[P any, C any] struct {
 
 type poolConfig struct {
 	retries     int
-	retryDelay  time.Duration
+	reinitDelay time.Duration
 	idleTimeout time.Duration
 	targetLoad  float64
 	name        string
@@ -59,9 +59,9 @@ func Retries(n int) func(c *poolConfig) error {
 	}
 }
 
-func RetryDelay(d time.Duration) func(c *poolConfig) error {
+func ReinitDelay(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
-		c.retryDelay = d
+		c.reinitDelay = d
 		return nil
 	}
 }
@@ -117,7 +117,7 @@ func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerI
 func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) error, workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, C], error) {
 	// default configuration
 	config := poolConfig{
-		retryDelay:  time.Second,
+		reinitDelay: time.Second,
 		idleTimeout: 20 * time.Second,
 		targetLoad:  0.9,
 	}
@@ -147,7 +147,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 
 	p := Pool[P, C]{
 		retries:          config.retries,
-		retryDelay:       config.retryDelay,
+		reinitDelay:      config.reinitDelay,
 		idleTimeout:      config.idleTimeout,
 		targetLoad:       config.targetLoad,
 		name:             config.name,
@@ -405,7 +405,7 @@ loop:
 				connection, err := w.pool.workerInit(w.id)
 				if err != nil {
 					w.pool.loggerInfo.Printf("[workerpool/worker%d] workerInit failed: %s\n", w.id, err)
-					time.Sleep(w.pool.retryDelay)
+					time.Sleep(w.pool.reinitDelay)
 					continue
 				}
 				w.connection = &connection
