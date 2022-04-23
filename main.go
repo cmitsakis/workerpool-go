@@ -19,7 +19,13 @@ type Job[P any] struct {
 	Attempt int
 }
 
-type Pool[P any, C any] struct {
+type Result[P, R any] struct {
+	Job   Job[P]
+	Value R
+	Error error
+}
+
+type Pool[P any, R any, C any] struct {
 	maxActiveWorkers int
 	retries          int
 	reinitDelay      time.Duration
@@ -28,7 +34,7 @@ type Pool[P any, C any] struct {
 	name             string
 	loggerInfo       *log.Logger
 	loggerDebug      *log.Logger
-	handler          func(job Job[P], workerID int, connection C) error
+	handler          func(job Job[P], workerID int, connection C) (R, error)
 	workerInit       func(workerID int) (C, error)
 	workerDeinit     func(workerID int, connection C) error
 	concurrency      int32
@@ -38,6 +44,7 @@ type Pool[P any, C any] struct {
 	wgWorkers        sync.WaitGroup
 	nJobsProcessing  int32
 	jobsDone         chan struct{}
+	Results          chan Result[P, R]
 	enableWorker     chan struct{}
 	disableWorker    chan struct{}
 }
@@ -121,7 +128,7 @@ func LoggerDebug(l *log.Logger) func(c *poolConfig) error {
 }
 
 // NewPoolSimple creates a new worker pool.
-func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerID int) error, options ...func(*poolConfig) error) (*Pool[P, struct{}], error) {
+func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerID int) error, options ...func(*poolConfig) error) (*Pool[P, struct{}, struct{}], error) {
 	handler2 := func(job Job[P], workerID int, connection struct{}) error {
 		return handler(job, workerID)
 	}
@@ -129,7 +136,27 @@ func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerI
 }
 
 // NewPoolWithInit creates a new worker pool with workerInit() and workerDeinit() functions.
-func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) error, workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, C], error) {
+func NewPoolWithInit[P, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) error, workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, struct{}, C], error) {
+	handler2 := func(job Job[P], workerID int, connection C) (struct{}, error) {
+		return struct{}{}, handler(job, workerID, connection)
+	}
+	return newPool[P, struct{}, C](maxActiveWorkers, handler2, nil, nil, false, options...)
+}
+
+// NewPoolWithResults creates a new worker pool with Results channel. You should consume from this channel until it is closed.
+func NewPoolWithResults[P, R any](maxActiveWorkers int, handler func(job Job[P], workerID int) (R, error), options ...func(*poolConfig) error) (*Pool[P, R, struct{}], error) {
+	handler2 := func(job Job[P], workerID int, connection struct{}) (R, error) {
+		return handler(job, workerID)
+	}
+	return newPool[P, R, struct{}](maxActiveWorkers, handler2, nil, nil, true, options...)
+}
+
+// NewPoolWithInitResults creates a new worker pool with workerInit() and workerDeinit() functions and Results channel. You should consume from this channel until it is closed.
+func NewPoolWithInitResults[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) (R, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, R, C], error) {
+	return newPool[P, R, C](maxActiveWorkers, handler, workerInit, workerDeinit, true, options...)
+}
+
+func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) (R, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, createResultsChannel bool, options ...func(*poolConfig) error) (*Pool[P, R, C], error) {
 	// default configuration
 	config := poolConfig{
 		reinitDelay: time.Second,
@@ -160,7 +187,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 		}
 	}
 
-	p := Pool[P, C]{
+	p := Pool[P, R, C]{
 		retries:          config.retries,
 		reinitDelay:      config.reinitDelay,
 		idleTimeout:      config.idleTimeout,
@@ -179,6 +206,9 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 	p.jobsNew = make(chan P, 2)
 	p.jobsQueue = make(chan Job[P], p.maxActiveWorkers) // size p.maxActiveWorkers in order to avoid deadlock
 	p.jobsDone = make(chan struct{}, p.maxActiveWorkers)
+	if createResultsChannel {
+		p.Results = make(chan Result[P, R])
+	}
 	p.enableWorker = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{})
 	go p.loop()
@@ -190,7 +220,7 @@ func NewPoolWithInit[P any, C any](maxActiveWorkers int, handler func(job Job[P]
 	return &p, nil
 }
 
-func (p *Pool[P, C]) loop() {
+func (p *Pool[P, R, C]) loop() {
 	var loadAvg float64 = 1
 	var jobID int
 	var jobIDWhenLastEnabledWorker int
@@ -332,7 +362,7 @@ func (p *Pool[P, C]) loop() {
 }
 
 // Submit adds a new job to the queue.
-func (p *Pool[P, C]) Submit(jobPayload P) {
+func (p *Pool[P, R, C]) Submit(jobPayload P) {
 	p.wgJobs.Add(1)
 	select {
 	case p.jobsNew <- jobPayload:
@@ -351,7 +381,7 @@ func (p *Pool[P, C]) Submit(jobPayload P) {
 // StopAndWait shuts down the pool.
 // Once called no more jobs can be submitted,
 // and waits for all enqueued jobs to finish and workers to stop.
-func (p *Pool[P, C]) StopAndWait() {
+func (p *Pool[P, R, C]) StopAndWait() {
 	close(p.jobsNew)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for all jobs to finish")
@@ -365,23 +395,26 @@ func (p *Pool[P, C]) StopAndWait() {
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] finished")
 	}
+	if p.Results != nil {
+		close(p.Results)
+	}
 }
 
-type worker[P, C any] struct {
+type worker[P, R, C any] struct {
 	id         int
-	pool       *Pool[P, C]
+	pool       *Pool[P, R, C]
 	connection *C
 	idleTicker *time.Ticker
 }
 
-func newWorker[P, C any](p *Pool[P, C], id int) *worker[P, C] {
-	return &worker[P, C]{
+func newWorker[P, R, C any](p *Pool[P, R, C], id int) *worker[P, R, C] {
+	return &worker[P, R, C]{
 		id:   id,
 		pool: p,
 	}
 }
 
-func (w *worker[P, C]) loop() {
+func (w *worker[P, R, C]) loop() {
 	enabled := false
 	deinit := func() {
 		if w.idleTicker != nil {
@@ -446,7 +479,7 @@ loop:
 				break loop
 			}
 			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
-			err := w.pool.handler(j, w.id, *w.connection)
+			resultValue, err := w.pool.handler(j, w.id, *w.connection)
 			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
 			w.idleTicker.Stop()
 			w.idleTicker = time.NewTicker(w.pool.idleTimeout)
@@ -454,6 +487,9 @@ loop:
 				j.Attempt++
 				w.pool.jobsQueue <- j
 			} else {
+				if w.pool.Results != nil {
+					w.pool.Results <- Result[P, R]{Job: j, Value: resultValue, Error: err}
+				}
 				w.pool.jobsDone <- struct{}{}
 				w.pool.wgJobs.Done()
 			}
