@@ -51,6 +51,7 @@ type Pool[P any, R any, C any] struct {
 }
 
 type poolConfig struct {
+	setOptions   map[int]struct{}
 	fixedWorkers bool
 	retries      int
 	reinitDelay  time.Duration
@@ -61,10 +62,22 @@ type poolConfig struct {
 	loggerDebug  *log.Logger
 }
 
+const (
+	optionFixedWorkers = iota
+	optionRetries
+	optionReinitDelay
+	optionIdleTimeout
+	optionTargetLoad
+	optionName
+	optionLoggerInfo
+	optionLoggerDebug
+)
+
 // FixedWorkers disables auto-scaling and makes the pool use a fixed number of workers equal to the value of maxActiveWorkers.
 func FixedWorkers() func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.fixedWorkers = true
+		c.setOptions[optionFixedWorkers] = struct{}{}
 		return nil
 	}
 }
@@ -73,6 +86,7 @@ func FixedWorkers() func(c *poolConfig) error {
 func Retries(n int) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.retries = n
+		c.setOptions[optionRetries] = struct{}{}
 		return nil
 	}
 }
@@ -81,6 +95,7 @@ func Retries(n int) func(c *poolConfig) error {
 func ReinitDelay(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.reinitDelay = d
+		c.setOptions[optionReinitDelay] = struct{}{}
 		return nil
 	}
 }
@@ -89,6 +104,7 @@ func ReinitDelay(d time.Duration) func(c *poolConfig) error {
 func IdleTimeout(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.idleTimeout = d
+		c.setOptions[optionIdleTimeout] = struct{}{}
 		return nil
 	}
 }
@@ -109,6 +125,7 @@ func TargetLoad(v float64) func(c *poolConfig) error {
 			return fmt.Errorf("TargetLoad() invalid argument (v <= 0)")
 		}
 		c.targetLoad = v
+		c.setOptions[optionTargetLoad] = struct{}{}
 		return nil
 	}
 }
@@ -117,6 +134,7 @@ func TargetLoad(v float64) func(c *poolConfig) error {
 func Name(s string) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.name = s
+		c.setOptions[optionName] = struct{}{}
 		return nil
 	}
 }
@@ -125,6 +143,7 @@ func Name(s string) func(c *poolConfig) error {
 func LoggerInfo(l *log.Logger) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.loggerInfo = l
+		c.setOptions[optionLoggerInfo] = struct{}{}
 		return nil
 	}
 }
@@ -133,6 +152,7 @@ func LoggerInfo(l *log.Logger) func(c *poolConfig) error {
 func LoggerDebug(l *log.Logger) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.loggerDebug = l
+		c.setOptions[optionLoggerDebug] = struct{}{}
 		return nil
 	}
 }
@@ -169,6 +189,7 @@ func NewPoolWithInitResults[P, R, C any](maxActiveWorkers int, handler func(job 
 func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) (R, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, createResultsChannel bool, options ...func(*poolConfig) error) (*Pool[P, R, C], error) {
 	// default configuration
 	config := poolConfig{
+		setOptions:  make(map[int]struct{}),
 		reinitDelay: time.Second,
 		idleTimeout: 20 * time.Second,
 		targetLoad:  0.9,
