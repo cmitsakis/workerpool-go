@@ -200,6 +200,11 @@ func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerI
 			return nil, fmt.Errorf("config error: %s", err)
 		}
 	}
+	_, setFixedWorkers := config.setOptions[optionFixedWorkers]
+	_, setTargetLoad := config.setOptions[optionTargetLoad]
+	if setFixedWorkers && setTargetLoad {
+		return nil, fmt.Errorf("options FixedWorkers() and TargetLoad() are incompatible")
+	}
 
 	var loggerInfo *log.Logger
 	if config.loggerInfo != nil {
