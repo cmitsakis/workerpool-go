@@ -27,6 +27,7 @@ type Result[P, R any] struct {
 
 type Pool[P any, R any, C any] struct {
 	maxActiveWorkers int
+	fixedWorkers     bool
 	retries          int
 	reinitDelay      time.Duration
 	idleTimeout      time.Duration
@@ -50,13 +51,22 @@ type Pool[P any, R any, C any] struct {
 }
 
 type poolConfig struct {
-	retries     int
-	reinitDelay time.Duration
-	idleTimeout time.Duration
-	targetLoad  float64
-	name        string
-	loggerInfo  *log.Logger
-	loggerDebug *log.Logger
+	fixedWorkers bool
+	retries      int
+	reinitDelay  time.Duration
+	idleTimeout  time.Duration
+	targetLoad   float64
+	name         string
+	loggerInfo   *log.Logger
+	loggerDebug  *log.Logger
+}
+
+// FixedWorkers disables auto-scaling and makes the pool use a fixed number of workers equal to the value of maxActiveWorkers.
+func FixedWorkers() func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		c.fixedWorkers = true
+		return nil
+	}
 }
 
 // Retries sets the number of times a job will be retried if it fails.
@@ -196,6 +206,7 @@ func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerI
 		loggerInfo:       loggerInfo,
 		loggerDebug:      loggerDebug,
 		maxActiveWorkers: maxActiveWorkers,
+		fixedWorkers:     config.fixedWorkers,
 		handler:          handler,
 		workerInit:       workerInit,
 		workerDeinit:     workerDeinit,
@@ -213,7 +224,7 @@ func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerI
 	p.disableWorker = make(chan struct{})
 	go p.loop()
 	for i := 0; i < p.maxActiveWorkers; i++ {
-		w := newWorker(&p, i)
+		w := newWorker(&p, i, p.fixedWorkers)
 		p.wgWorkers.Add(1)
 		go w.loop()
 	}
@@ -244,7 +255,7 @@ func (p *Pool[P, R, C]) loop() {
 				}
 			}
 		}
-		if !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 {
+		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 {
 			// if load is high and we haven't enabled a worker recently, enable n workers
 			// n = number of workers we should enable
 			// find n such that:
@@ -267,7 +278,7 @@ func (p *Pool[P, R, C]) loop() {
 				jobIDWhenLastEnabledWorker = jobID
 			}
 		}
-		if concurrency > 0 && jobDone {
+		if !p.fixedWorkers && concurrency > 0 && jobDone {
 			if loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > 20 {
 				// if load is low and we didn't disable a worker recently, disable n workers
 				// n = number of workers we should disable
@@ -301,7 +312,7 @@ func (p *Pool[P, R, C]) loop() {
 		}
 		jobDone = false
 		// make sure not all workers are disabled while there are jobs
-		if concurrency == 0 && nJobsInSystem > 0 {
+		if !p.fixedWorkers && concurrency == 0 && nJobsInSystem > 0 {
 			if p.loggerDebug != nil {
 				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] no active worker. try to enable new worker", doneCounter)
 			}
@@ -364,6 +375,10 @@ func (p *Pool[P, R, C]) loop() {
 // Submit adds a new job to the queue.
 func (p *Pool[P, R, C]) Submit(jobPayload P) {
 	p.wgJobs.Add(1)
+	if p.fixedWorkers {
+		p.jobsNew <- jobPayload
+		return
+	}
 	select {
 	case p.jobsNew <- jobPayload:
 	default:
@@ -422,16 +437,18 @@ func ConnectPools[P, R, C, R2, C2 any](p1 *Pool[P, R, C], p2 *Pool[R, R2, C2], h
 }
 
 type worker[P, R, C any] struct {
-	id         int
-	pool       *Pool[P, R, C]
-	connection *C
-	idleTicker *time.Ticker
+	id            int
+	pool          *Pool[P, R, C]
+	connection    *C
+	idleTicker    *time.Ticker
+	alwaysEnabled bool
 }
 
-func newWorker[P, R, C any](p *Pool[P, R, C], id int) *worker[P, R, C] {
+func newWorker[P, R, C any](p *Pool[P, R, C], id int, alwaysEnabled bool) *worker[P, R, C] {
 	return &worker[P, R, C]{
-		id:   id,
-		pool: p,
+		id:            id,
+		pool:          p,
+		alwaysEnabled: alwaysEnabled,
 	}
 }
 
@@ -462,12 +479,14 @@ func (w *worker[P, R, C]) loop() {
 loop:
 	for {
 		if !enabled {
-			if w.idleTicker != nil {
+			if !w.alwaysEnabled && w.idleTicker != nil {
 				w.idleTicker.Stop()
 			}
-			_, ok := <-w.pool.enableWorker
-			if !ok {
-				break
+			if !w.alwaysEnabled {
+				_, ok := <-w.pool.enableWorker
+				if !ok {
+					break
+				}
 			}
 			enabled = true
 			atomic.AddInt32(&w.pool.concurrency, 1)
@@ -485,7 +504,12 @@ loop:
 			} else {
 				w.connection = new(C)
 			}
-			w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+			if !w.alwaysEnabled {
+				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+			} else {
+				neverTickingTicker := time.Ticker{C: make(chan time.Time)}
+				w.idleTicker = &neverTickingTicker
+			}
 		}
 		select {
 		case <-w.idleTicker.C:
@@ -502,8 +526,10 @@ loop:
 			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
 			resultValue, err := w.pool.handler(j, w.id, *w.connection)
 			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
-			w.idleTicker.Stop()
-			w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+			if !w.alwaysEnabled {
+				w.idleTicker.Stop()
+				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+			}
 			if err != nil && errorIsRetryable(err) && j.Attempt < w.pool.retries {
 				j.Attempt++
 				w.pool.jobsQueue <- j
