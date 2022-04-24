@@ -50,6 +50,7 @@ func TestPoolSimple(t *testing.T) {
 	}, Retries(4), IdleTimeout(1*time.Minute), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
 	if err != nil {
 		log.Printf("NewPoolSimple() failed: %s", err)
+		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -109,6 +110,7 @@ func TestPoolFull(t *testing.T) {
 	}, Retries(4), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
 	if err != nil {
 		log.Printf("NewPool() failed: %s", err)
+		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
