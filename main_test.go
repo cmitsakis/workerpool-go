@@ -140,28 +140,41 @@ func TestMultiplePools(t *testing.T) {
 	const inputPeriod = 10 * time.Millisecond
 	const jobDur1 = 250 * time.Millisecond
 	const jobDur2 = 500 * time.Millisecond
+	const jobDur3 = 750 * time.Millisecond
 
-	results := make(chan float64)
-	p1, err := NewPoolSimple(100, func(job Job[float64], workerID int) error {
+	// stage 1: calculate square root
+	p1, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur1)
-		results <- math.Sqrt(job.Payload)
-		return nil
+		return math.Sqrt(job.Payload), nil
 	}, Name("p1"), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
 	if err != nil {
 		log.Printf("NewPoolSimple() failed: %s", err)
 		return
 	}
 
-	results2 := make(chan float64)
-	p2, err := NewPoolSimple(100, func(job Job[float64], workerID int) error {
+	// stage 2: negate number
+	p2, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur2)
-		results2 <- -job.Payload
-		return nil
+		return -job.Payload, nil
 	}, Name("p2"), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
 	if err != nil {
 		log.Printf("NewPoolSimple() failed: %s", err)
 		return
 	}
+
+	// stage 3: convert float to string
+	p3, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (string, error) {
+		time.Sleep(jobDur3)
+		return fmt.Sprintf("%.3f", job.Payload), nil
+	}, Name("p3"), LoggerInfo(log.Default()), LoggerDebug(log.Default()))
+	if err != nil {
+		log.Printf("NewPoolSimple() failed: %s", err)
+		return
+	}
+
+	// connect p1, p2, p3 into a pipeline
+	ConnectPools(p1, p2, nil)
+	ConnectPools(p2, p3, nil)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -175,21 +188,10 @@ func TestMultiplePools(t *testing.T) {
 		}
 		log.Println("[test] submitted jobs - calling p1.StopAndWait()")
 		p1.StopAndWait()
-		close(results)
 	}()
 
-	go func() {
-		for result := range results {
-			log.Println("intermediate result:", result)
-			p2.Submit(result)
-		}
-		log.Println("[test] submitted jobs - calling p2.StopAndWait()")
-		p2.StopAndWait()
-		close(results2)
-	}()
-
-	for result := range results2 {
-		log.Println("result:", result)
+	for result := range p3.Results {
+		log.Println("result:", result.Value)
 	}
 }
 

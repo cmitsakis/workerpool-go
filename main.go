@@ -400,6 +400,27 @@ func (p *Pool[P, R, C]) StopAndWait() {
 	}
 }
 
+// ConnectPools starts a goroutine that reads the results of the first pool,
+// and submits them to the second, if there is no error,
+// or passes them to the handleError function if there is an error.
+//
+// WARNING: Should only be used if the first pool has a not-nil Results channel.
+// Which means it was created by the constructors NewPoolWithResults() or NewPoolWithInitResults().
+func ConnectPools[P, R, C, R2, C2 any](p1 *Pool[P, R, C], p2 *Pool[R, R2, C2], handleError func(Result[P, R])) {
+	go func() {
+		for result := range p1.Results {
+			if result.Error != nil {
+				if handleError != nil {
+					handleError(result)
+				}
+			} else {
+				p2.Submit(result.Value)
+			}
+		}
+		p2.StopAndWait()
+	}()
+}
+
 type worker[P, R, C any] struct {
 	id         int
 	pool       *Pool[P, R, C]
