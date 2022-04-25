@@ -2,11 +2,16 @@
 
 Generic worker pool with limited concurrency, backpressure, dynamically resizable number of workers, and composability of pools into pipelines.
 
+**backpressure:**
 The pool includes a queue with limited capacity.
 If too many jobs are submitted and the queue is full, submissions block.
 
+**auto-scaling:**
 If too many jobs are in queue, new workers are started (if available).
 If there are more active workers than needed some workers are stopped.
+
+**steady-state behavior:**
+If the rate of job submissions is constant, the number of active workers will quickly become almost constant, and the output rate will be equal to the input (submission) rate.
 
 Notable differences from other worker pool libraries:
 
