@@ -82,7 +82,7 @@ func FixedWorkers() func(c *poolConfig) error {
 	}
 }
 
-// Retries sets the number of times a job will be retried if it fails.
+// Retries sets the number of times a job will be retried if it fails with a retryable error (see function ErrorWrapRetryable).
 func Retries(n int) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.retries = n
