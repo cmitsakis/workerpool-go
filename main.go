@@ -25,7 +25,7 @@ type Result[P, R any] struct {
 	Error error
 }
 
-type Pool[P any, R any, C any] struct {
+type Pool[P, R, C any] struct {
 	maxActiveWorkers int
 	fixedWorkers     bool
 	retries          int
