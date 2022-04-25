@@ -181,8 +181,8 @@ func NewPoolWithResults[P, R any](maxActiveWorkers int, handler func(job Job[P],
 	return newPool[P, R, struct{}](maxActiveWorkers, handler2, nil, nil, true, options...)
 }
 
-// NewPoolWithInitResults creates a new worker pool with workerInit() and workerDeinit() functions and Results channel. You should consume from this channel until it is closed.
-func NewPoolWithInitResults[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) (R, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, R, C], error) {
+// NewPoolWithResultsAndInit creates a new worker pool with workerInit() and workerDeinit() functions and Results channel. You should consume from this channel until it is closed.
+func NewPoolWithResultsAndInit[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerID int, connection C) (R, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[P, R, C], error) {
 	return newPool[P, R, C](maxActiveWorkers, handler, workerInit, workerDeinit, true, options...)
 }
 
