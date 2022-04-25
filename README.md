@@ -112,6 +112,11 @@ func main() {
 	}
 }
 ```
+
+## Contributing
+
+Bug reports, bug fixes, and ideas to improve the API, are welcome.
+
 ## License
 
 Copyright (C) 2022 Charalampos Mitsakis (go.mitsakis.org/workerpool)
