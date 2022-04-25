@@ -12,7 +12,7 @@ Notable differences from other worker pool libraries:
 
 - Each worker can maintain a connection. This is useful if you want to implement a crawler or email sender and want to avoid reconnecting for each job.
 - You don't submit a closure for each job. Instead you pass a handler function at the creation of the pool and then you submit job payloads.
-- You can compose worker pools into a pipeline.
+- You can connect worker pools into a pipeline. That way you can increase performance by separating IO-intensive from CPU-intensive tasks.
 
 Under development. API is subject to change.
 
