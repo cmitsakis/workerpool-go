@@ -15,7 +15,9 @@ If the rate of job submissions is constant, the number of active workers will qu
 
 Notable differences from other worker pool libraries:
 
-- Each worker can maintain a connection. This is useful if you want to implement a crawler or email sender and want to avoid reconnecting for each job.
+- Each worker can maintain a "connection" for the duration of the time it is active.
+  A "connection" can in fact be any type of value returned by the worker initialization function. Connection is just the most obvious use-case for such value.
+  This is useful if you want to implement a crawler or email sender and want to avoid reconnecting for each job.
 - You don't submit a closure for each job. Instead you pass a handler function at the creation of the pool and then you submit job payloads.
 - You can connect worker pools into a pipeline. That way you can increase performance by separating IO-intensive from CPU-intensive tasks.
 
