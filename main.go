@@ -401,22 +401,7 @@ func (p *Pool[P, R, C]) loop() {
 // Submit adds a new job to the queue.
 func (p *Pool[P, R, C]) Submit(jobPayload P) {
 	p.wgJobs.Add(1)
-	if p.fixedWorkers {
-		p.jobsNew <- jobPayload
-		return
-	}
-	select {
-	case p.jobsNew <- jobPayload:
-	default:
-		if p.loggerDebug != nil {
-			p.loggerDebug.Println("[workerpool/Submit] blocked. try to enable new worker")
-		}
-		select {
-		case p.enableWorker <- struct{}{}:
-		default:
-		}
-		p.jobsNew <- jobPayload
-	}
+	p.jobsNew <- jobPayload
 }
 
 // StopAndWait shuts down the pool.
