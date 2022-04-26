@@ -44,7 +44,7 @@ type Pool[P, R, C any] struct {
 	wgJobs           sync.WaitGroup
 	wgWorkers        sync.WaitGroup
 	nJobsProcessing  int32
-	jobsDone         chan struct{}
+	jobsDone         chan Result[P, R]
 	Results          chan Result[P, R]
 	enableWorker     chan struct{}
 	disableWorker    chan struct{}
@@ -242,9 +242,9 @@ func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerI
 	}
 	p.jobsNew = make(chan P, 2)
 	p.jobsQueue = make(chan Job[P], p.maxActiveWorkers) // size p.maxActiveWorkers in order to avoid deadlock
-	p.jobsDone = make(chan struct{}, p.maxActiveWorkers)
+	p.jobsDone = make(chan Result[P, R], p.maxActiveWorkers)
 	if createResultsChannel {
-		p.Results = make(chan Result[P, R])
+		p.Results = make(chan Result[P, R], p.maxActiveWorkers)
 	}
 	p.enableWorker = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{})
@@ -361,10 +361,13 @@ func (p *Pool[P, R, C]) loop() {
 			// that way we make sure nJobsInSystem < len(p.jobsQueue)
 			// so writes to p.jobsQueue don't block
 			// blocking writes to p.jobsQueue would cause deadlock
-			_, ok := <-p.jobsDone
+			result, ok := <-p.jobsDone
 			if !ok {
 				p.jobsDone = nil
 				continue
+			}
+			if p.Results != nil {
+				p.writeResultAndDisableAWorkerIfBlocked(result)
 			}
 			nJobsInSystem--
 			doneCounter++
@@ -379,10 +382,13 @@ func (p *Pool[P, R, C]) loop() {
 				nJobsInSystem++
 				p.jobsQueue <- Job[P]{Payload: payload, ID: jobID, Attempt: 0}
 				jobID++
-			case _, ok := <-p.jobsDone:
+			case result, ok := <-p.jobsDone:
 				if !ok {
 					p.jobsDone = nil
 					continue
+				}
+				if p.Results != nil {
+					p.writeResultAndDisableAWorkerIfBlocked(result)
 				}
 				nJobsInSystem--
 				doneCounter++
@@ -395,6 +401,21 @@ func (p *Pool[P, R, C]) loop() {
 	close(p.disableWorker)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/loop] finished")
+	}
+}
+
+func (p *Pool[P, R, C]) writeResultAndDisableAWorkerIfBlocked(result Result[P, R]) {
+	select {
+	case p.Results <- result:
+	default:
+		if p.loggerDebug != nil {
+			p.loggerDebug.Println("[workerpool/loop] blocked. disable a worker")
+		}
+		select {
+		case p.disableWorker <- struct{}{}:
+		default:
+		}
+		p.Results <- result
 	}
 }
 
@@ -545,10 +566,7 @@ loop:
 				j.Attempt++
 				w.pool.jobsQueue <- j
 			} else {
-				if w.pool.Results != nil {
-					w.pool.Results <- Result[P, R]{Job: j, Value: resultValue, Error: err}
-				}
-				w.pool.jobsDone <- struct{}{}
+				w.pool.jobsDone <- Result[P, R]{Job: j, Value: resultValue, Error: err}
 				w.pool.wgJobs.Done()
 			}
 		}
