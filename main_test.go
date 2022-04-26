@@ -138,11 +138,22 @@ func TestPoolFull(t *testing.T) {
 	}
 }
 
-func TestMultiplePools(t *testing.T) {
-	const inputPeriod = 10 * time.Millisecond
-	const jobDur1 = 250 * time.Millisecond
-	const jobDur2 = 500 * time.Millisecond
-	const jobDur3 = 750 * time.Millisecond
+func TestMultiplePoolsLongInputPeriod(t *testing.T) {
+	testMultiplePools(t, 20*time.Millisecond)
+}
+
+func TestMultiplePoolsMediumInputPeriod(t *testing.T) {
+	testMultiplePools(t, 10*time.Millisecond)
+}
+
+func TestMultiplePoolsShortInputPeriod(t *testing.T) {
+	testMultiplePools(t, 0)
+}
+
+func testMultiplePools(t *testing.T, inputPeriod time.Duration) {
+	const jobDur1 = 333 * time.Millisecond
+	const jobDur2 = 666 * time.Millisecond
+	const jobDur3 = 1000 * time.Millisecond
 
 	// stage 1: calculate square root
 	p1, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
@@ -178,22 +189,42 @@ func TestMultiplePools(t *testing.T) {
 	ConnectPools(p1, p2, nil)
 	ConnectPools(p2, p3, nil)
 
+	const a = 0.1
+	var inputPeriodAvg time.Duration
+	lastSubmitted := time.Now()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
+	loop:
 		for i := 0; i < 10000; i++ {
-			if sleepCtx(ctx, inputPeriod) {
-				break
+			if inputPeriod == 0 {
+				select {
+				case <-ctx.Done():
+					break loop
+				default:
+				}
+			} else {
+				if sleepCtx(ctx, inputPeriod) {
+					break
+				}
 			}
-			log.Printf("[test] submitting job%d\n", i)
+			log.Printf("[test] submitting job%d - inputPeriodAvg: %v\n", i, inputPeriodAvg)
 			p1.Submit(float64(i))
+			inputPeriod := time.Since(lastSubmitted)
+			lastSubmitted = time.Now()
+			inputPeriodAvg = time.Duration(a*float64(inputPeriod) + (1-a)*float64(inputPeriodAvg))
 		}
 		log.Println("[test] submitted jobs - calling p1.StopAndWait()")
 		p1.StopAndWait()
 	}()
 
+	var outputPeriodAvg time.Duration
+	lastReceived := time.Now()
 	for result := range p3.Results {
-		log.Println("result:", result.Value)
+		outputPeriod := time.Since(lastReceived)
+		lastReceived = time.Now()
+		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
+		log.Println("[test] result:", result.Value, "outputPeriodAvg:", outputPeriodAvg)
 	}
 }
 
