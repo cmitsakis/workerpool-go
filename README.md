@@ -113,6 +113,82 @@ func main() {
 }
 ```
 
+A real world example with two pools.
+The first pool (p1) downloads URLs and the second (p2) processes the downloaded documents.
+Each worker has its own http.Transport that is reused between requests.
+```go
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"time"
+
+	"go.mitsakis.org/workerpool"
+)
+
+func main() {
+	// pool p1 downloads URLs
+	p1, _ := workerpool.NewPoolWithResultsAndInit(5, func(job workerpool.Job[string], workerID int, tr *http.Transport) ([]byte, error) {
+		client := &http.Client{
+			Transport: tr,
+			Timeout:   30 * time.Second,
+		}
+		resp, err := client.Get(job.Payload)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode > 399 {
+			return nil, fmt.Errorf("HTTP status code %d", resp.StatusCode)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %s", err)
+		}
+		return body, nil
+	}, func(workerID int) (*http.Transport, error) {
+		return &http.Transport{}, nil
+	}, func(workerID int, tr *http.Transport) error {
+		tr.CloseIdleConnections()
+		return nil
+	}, workerpool.Retries(2))
+
+	// pool p2 processes the content of the URLs downloaded by p1
+	p2, _ := workerpool.NewPoolWithResults(1, func(job workerpool.Job[[]byte], workerID int) (int, error) {
+		numOfLines := bytes.Count(job.Payload, []byte("\n"))
+		return numOfLines, nil
+	}, workerpool.FixedWorkers()) // we use a fixed number of workers (1) because it's a CPU intensive task
+
+	// connect pools p1, p2 into a pipeline.
+	// documents downloaded by p1 are submitted to p2 for further processing.
+	workerpool.ConnectPools(p1, p2, func(result workerpool.Result[string, []byte]) {
+		if result.Error != nil {
+			log.Printf("failed to download URL %v - error: %v", result.Job.Payload, result.Error)
+		}
+	})
+
+	go func() {
+		urls := []string{
+			"http://example.com/",
+			// add your own URLs
+		}
+		for _, u := range urls {
+			time.Sleep(100 * time.Millisecond)
+			log.Println("submitting URL:", u)
+			p1.Submit(u)
+		}
+		p1.StopAndWait()
+	}()
+
+	for result := range p2.Results {
+		log.Printf("web page has %d lines\n", result.Value)
+	}
+}
+```
+
 ## Contributing
 
 Bug reports, bug fixes, and ideas to improve the API, are welcome.
