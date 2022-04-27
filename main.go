@@ -263,6 +263,7 @@ func (p *Pool[P, R, C]) loop() {
 	var jobIDWhenLastEnabledWorker int
 	var doneCounter int
 	var doneCounterWhenLastDisabledWorker int
+	var doneCounterWhenResultsFull int
 	var nJobsInSystem int
 	var jobDone bool
 	for p.jobsNew != nil || p.jobsDone != nil {
@@ -367,7 +368,10 @@ func (p *Pool[P, R, C]) loop() {
 				continue
 			}
 			if p.Results != nil {
-				p.writeResultAndDisableAWorkerIfBlocked(result)
+				blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull)
+				if blocked {
+					doneCounterWhenResultsFull = doneCounter
+				}
 			}
 			nJobsInSystem--
 			doneCounter++
@@ -388,7 +392,10 @@ func (p *Pool[P, R, C]) loop() {
 					continue
 				}
 				if p.Results != nil {
-					p.writeResultAndDisableAWorkerIfBlocked(result)
+					blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull)
+					if blocked {
+						doneCounterWhenResultsFull = doneCounter
+					}
 				}
 				nJobsInSystem--
 				doneCounter++
@@ -404,18 +411,26 @@ func (p *Pool[P, R, C]) loop() {
 	}
 }
 
-func (p *Pool[P, R, C]) writeResultAndDisableAWorkerIfBlocked(result Result[P, R]) {
+func (p *Pool[P, R, C]) writeResultAndDisableWorkersIfBlocked(result Result[P, R], doneCounter, doneCounterWhenResultsFull int) bool {
 	select {
 	case p.Results <- result:
+		return false
 	default:
-		if p.loggerDebug != nil {
-			p.loggerDebug.Println("[workerpool/loop] blocked. disable a worker")
-		}
-		select {
-		case p.disableWorker <- struct{}{}:
-		default:
+		if doneCounter-doneCounterWhenResultsFull > 20 {
+			// do not disable any workers if we did so recently
+			concurrency := atomic.LoadInt32(&p.concurrency)
+			if p.loggerDebug != nil {
+				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, int(concurrency)/2)
+			}
+			for i := 0; i < int(concurrency)/2; i++ {
+				select {
+				case p.disableWorker <- struct{}{}:
+				default:
+				}
+			}
 		}
 		p.Results <- result
+		return true
 	}
 }
 
