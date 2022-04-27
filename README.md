@@ -43,29 +43,20 @@ package main
 import (
 	"fmt"
 	"math"
+
 	"go.mitsakis.org/workerpool"
 )
 
 func main() {
-	results := make(chan float64)
-	p, err := workerpool.NewPoolSimple(4, func(job workerpool.Job[float64], workerID int) error {
-		results <- math.Sqrt(job.Payload)
+	p, _ := workerpool.NewPoolSimple(4, func(job workerpool.Job[float64], workerID int) error {
+		result := math.Sqrt(job.Payload)
+		fmt.Println("result:", result)
 		return nil
 	})
-	if err != nil {
-		fmt.Printf("NewPoolSimple() failed: %s", err)
-		return
+	for i := 0; i < 100; i++ {
+		p.Submit(float64(i))
 	}
-	go func() {
-		for i := 0; i < 100; i++ {
-			p.Submit(float64(i))
-		}
-		p.StopAndWait()
-		close(results)
-	}()
-	for result := range results {
-		fmt.Println("result:", result)
-	}
+	p.StopAndWait()
 }
 ```
 

@@ -14,28 +14,15 @@ import (
 )
 
 func TestExample(t *testing.T) {
-	results := make(chan float64)
-	p, err := NewPoolSimple(4, func(job Job[float64], workerID int) error {
-		results <- math.Sqrt(job.Payload)
+	p, _ := NewPoolSimple(4, func(job Job[float64], workerID int) error {
+		result := math.Sqrt(job.Payload)
+		fmt.Println("result:", result)
 		return nil
 	}, LoggerInfo(log.Default()), LoggerDebug(log.Default()))
-	if err != nil {
-		log.Printf("NewPoolSimple() failed: %s", err)
-		return
+	for i := 0; i < 100; i++ {
+		p.Submit(float64(i))
 	}
-	go func() {
-		for i := 0; i < 100; i++ {
-			log.Printf("[test] submitting job%d\n", i)
-			p.Submit(float64(i))
-		}
-		log.Println("[test] submitted jobs - calling p.StopAndWait()")
-		p.StopAndWait()
-		log.Println("[test] p.StopAndWait() returned")
-		close(results)
-	}()
-	for result := range results {
-		log.Println("result:", result)
-	}
+	p.StopAndWait()
 }
 
 func TestPoolSimple(t *testing.T) {
