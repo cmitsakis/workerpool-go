@@ -281,8 +281,8 @@ func (p *Pool[P, R, C]) loop() {
 				}
 			}
 		}
-		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 {
-			// if load is high and we haven't enabled a worker recently, enable n workers
+		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 && len(p.Results) == 0 {
+			// if load is high, and we haven't enabled a worker recently, and len(p.Results) == 0, enable n workers
 			// n = number of workers we should enable
 			// find n such that:
 			// loadAvg < p.targetLoad*(concurrency+n)/concurrency
