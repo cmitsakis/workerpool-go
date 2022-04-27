@@ -130,14 +130,14 @@ func main() {
 		}
 		resp, err := client.Get(job.Payload)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("client.Get failed: %w", err)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 399 {
 			return nil, fmt.Errorf("HTTP status code %d", resp.StatusCode)
 		}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read response body: %s", err)
+			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}
 		return body, nil
 	}, func(workerID int) (*http.Transport, error) {
