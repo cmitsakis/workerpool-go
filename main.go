@@ -467,7 +467,7 @@ func (p *Pool[P, R, C]) StopAndWait() {
 // or passes them to the handleError function if there is an error.
 //
 // WARNING: Should only be used if the first pool has a not-nil Results channel.
-// Which means it was created by the constructors NewPoolWithResults() or NewPoolWithInitResults().
+// Which means it was created by the constructors NewPoolWithResults() or NewPoolWithResultsAndInit().
 func ConnectPools[P, R, C, R2, C2 any](p1 *Pool[P, R, C], p2 *Pool[R, R2, C2], handleError func(Result[P, R])) {
 	go func() {
 		for result := range p1.Results {
