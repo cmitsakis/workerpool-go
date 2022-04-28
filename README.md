@@ -15,11 +15,11 @@ If the rate of job submissions is constant, the number of active workers will qu
 
 Notable differences from other worker pool libraries:
 
-- Each worker can maintain a "connection" for the duration of the time it is active.
-  A "connection" can in fact be any type of value returned by the worker initialization function. Connection is just the most obvious use-case for such value.
-  This is useful if you want to implement a crawler or email sender and want to avoid reconnecting for each job.
+- Each worker can maintain a value (e.g. a connection) for the duration of the time it is active.
+  This is the value that is returned by the worker initialization function.
+  This way you can easily create a connection pool for a crawler or email sender.
 - You don't submit a closure for each job. Instead you pass a handler function at the creation of the pool and then you submit job payloads.
-- You can connect worker pools into a pipeline. That way you can increase performance by separating IO-intensive from CPU-intensive tasks.
+- You can connect worker pools into a pipeline. This way you can increase performance by separating IO-intensive from CPU-intensive tasks (see [crawler example](#crawler-pipeline-example)), or IO tasks of different parallelizability (e.g. crawling and saving to disk).
 
 Under development. API is subject to change.
 
@@ -37,6 +37,7 @@ go get go.mitsakis.org/workerpool
 
 ## Usage
 
+### Simple example
 ```go
 package main
 
@@ -59,6 +60,8 @@ func main() {
 	p.StopAndWait()
 }
 ```
+
+### Pipeline example
 
 A more complicated example with three pools connected into a pipeline.
 ```go
@@ -103,6 +106,8 @@ func main() {
 	}
 }
 ```
+
+### Crawler pipeline example
 
 A real world example with two pools.
 The first pool (p1) downloads URLs and the second (p2) processes the downloaded documents.
