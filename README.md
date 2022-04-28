@@ -140,9 +140,9 @@ func main() {
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}
 		return body, nil
-	}, func(workerID int) (*http.Transport, error) {
+	}, func(workerID int) (*http.Transport, error) { // worker init function
 		return &http.Transport{}, nil
-	}, func(workerID int, tr *http.Transport) error {
+	}, func(workerID int, tr *http.Transport) error { // worker deinit function
 		tr.CloseIdleConnections()
 		return nil
 	}, workerpool.Retries(2))
