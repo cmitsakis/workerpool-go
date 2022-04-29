@@ -48,6 +48,7 @@ type Pool[P, R, C any] struct {
 	Results          chan Result[P, R]
 	enableWorker     chan struct{}
 	disableWorker    chan struct{}
+	monitor          func(s stats)
 }
 
 type poolConfig struct {
@@ -60,6 +61,7 @@ type poolConfig struct {
 	name         string
 	loggerInfo   *log.Logger
 	loggerDebug  *log.Logger
+	monitor      func(s stats)
 }
 
 const (
@@ -157,6 +159,13 @@ func LoggerDebug(l *log.Logger) func(c *poolConfig) error {
 	}
 }
 
+func monitor(f func(s stats)) func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		c.monitor = f
+		return nil
+	}
+}
+
 // NewPoolSimple creates a new worker pool.
 func NewPoolSimple[P any](maxActiveWorkers int, handler func(job Job[P], workerID int) error, options ...func(*poolConfig) error) (*Pool[P, struct{}, struct{}], error) {
 	handler2 := func(job Job[P], workerID int, connection struct{}) error {
@@ -231,6 +240,7 @@ func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerI
 		name:             config.name,
 		loggerInfo:       loggerInfo,
 		loggerDebug:      loggerDebug,
+		monitor:          config.monitor,
 		maxActiveWorkers: maxActiveWorkers,
 		fixedWorkers:     config.fixedWorkers,
 		handler:          handler,
@@ -257,6 +267,14 @@ func newPool[P, R, C any](maxActiveWorkers int, handler func(job Job[P], workerI
 	return &p, nil
 }
 
+type stats struct {
+	Time          time.Time
+	NJobsInSystem int
+	Concurrency   int32
+	JobID         int
+	DoneCounter   int
+}
+
 func (p *Pool[P, R, C]) loop() {
 	var loadAvg float64 = 1
 	var jobID int
@@ -281,6 +299,15 @@ func (p *Pool[P, R, C]) loop() {
 					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f jobID=%d\n", len(p.jobsNew), len(p.jobsQueue), nJobsProcessing, nJobsInSystem, concurrency, loadAvg, jobID)
 				}
 			}
+		}
+		if p.monitor != nil {
+			p.monitor(stats{
+				Time:          time.Now(),
+				NJobsInSystem: nJobsInSystem,
+				Concurrency:   concurrency,
+				JobID:         jobID,
+				DoneCounter:   doneCounter,
+			})
 		}
 		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 && len(p.Results) == 0 {
 			// if load is high, and we haven't enabled a worker recently, and len(p.Results) == 0, enable n workers
