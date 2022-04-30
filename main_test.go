@@ -6,6 +6,7 @@ package workerpool
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -16,9 +17,9 @@ import (
 func TestExample(t *testing.T) {
 	p, _ := NewPoolSimple(4, func(job Job[float64], workerID int) error {
 		result := math.Sqrt(job.Payload)
-		fmt.Println("result:", result)
+		t.Logf("result: %v", result)
 		return nil
-	}, LoggerInfo(log.Default()), LoggerDebug(log.Default()))
+	}, LoggerInfo(loggerIfTestVerbose()), LoggerDebug(loggerIfTestVerbose()))
 	for i := 0; i < 100; i++ {
 		p.Submit(float64(i))
 	}
@@ -26,6 +27,12 @@ func TestExample(t *testing.T) {
 }
 
 func TestPool(t *testing.T) {
+	var logger *log.Logger
+	if testing.Verbose() {
+		logger = log.Default()
+	} else {
+		logger = log.New(io.Discard, "", 0)
+	}
 	rand.Seed(time.Now().UnixNano())
 	workerProfiles := make([]string, 0)
 	for i := 0; i < 100; i++ {
@@ -38,7 +45,7 @@ func TestPool(t *testing.T) {
 	results := make(chan struct{})
 	p, err := NewPoolWithInit(len(workerProfiles), func(job Job[int], workerID int, connection struct{}) error {
 		worker := workerProfiles[workerID]
-		log.Printf("[test/worker%v] job%d started - attempt %d - worker %v\n", workerID, job.ID, job.Attempt, worker)
+		logger.Printf("[test/worker%v] job%d started - attempt %d - worker %v\n", workerID, job.ID, job.Attempt, worker)
 		time.Sleep(jobDur)
 		if rand.Float32() > successRate {
 			return ErrorWrapRetryable(fmt.Errorf("job failure"))
@@ -47,13 +54,13 @@ func TestPool(t *testing.T) {
 		return nil
 	}, func(workerID int) (struct{}, error) {
 		time.Sleep(3 * jobDur)
-		log.Printf("[test/worker%v] connecting\n", workerID)
+		logger.Printf("[test/worker%v] connecting\n", workerID)
 		return struct{}{}, nil
 	}, func(workerID int, connection struct{}) error {
 		time.Sleep(3 * jobDur)
-		log.Printf("[test/worker%v] disconnecting\n", workerID)
+		logger.Printf("[test/worker%v] disconnecting\n", workerID)
 		return nil
-	}, Retries(4), LoggerInfo(log.Default()), LoggerDebug(log.Default()), monitor(func(s stats) {
+	}, Retries(4), LoggerInfo(loggerIfTestVerbose()), LoggerDebug(loggerIfTestVerbose()), monitor(func(s stats) {
 		pStats = append(pStats, s)
 	}))
 	if err != nil {
@@ -69,13 +76,13 @@ func TestPool(t *testing.T) {
 			if sleepCtx(ctx, inputPeriod) {
 				break
 			}
-			log.Printf("[test] submitting job%d\n", i)
+			logger.Printf("[test] submitting job%d\n", i)
 			p.Submit(i)
 		}
 		log.Println("[test] submitted jobs - calling p.StopAndWait()")
 		stopped = time.Now()
 		p.StopAndWait()
-		log.Println("[test] p.StopAndWait() returned")
+		logger.Println("[test] p.StopAndWait() returned")
 		close(results)
 	}()
 	const a = 0.1
@@ -85,11 +92,11 @@ func TestPool(t *testing.T) {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
 		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
-		log.Println("[test] outputPeriodAvg:", outputPeriodAvg)
+		logger.Println("[test] outputPeriodAvg:", outputPeriodAvg)
 	}
 
 	pWorkersAvg, pWorkersStd := processStats(pStats, started.Add(30*time.Second), stopped)
-	fmt.Printf("pool workers: avg=%v std=%v\n", pWorkersAvg, pWorkersStd)
+	log.Printf("pool workers: avg=%v std=%v\n", pWorkersAvg, pWorkersStd)
 	// expectedNumOfWorkers = effectiveJobDur/inputPeriod
 	// where effectiveJobDur = jobDur / successRate
 	// because each job is tried 1/successRate on average
@@ -119,6 +126,13 @@ func TestPipelineShortInputPeriod(t *testing.T) {
 }
 
 func testPipeline(t *testing.T, inputPeriod time.Duration) {
+	var logger *log.Logger
+	if testing.Verbose() {
+		logger = log.Default()
+	} else {
+		logger = log.New(io.Discard, "", 0)
+	}
+
 	const jobDur1 = 333 * time.Millisecond
 	const jobDur2 = 666 * time.Millisecond
 	const jobDur3 = 1000 * time.Millisecond
@@ -131,7 +145,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	p1, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur1)
 		return math.Sqrt(job.Payload), nil
-	}, Name("p1"), LoggerInfo(log.Default()), LoggerDebug(log.Default()), monitor(func(s stats) {
+	}, Name("p1"), LoggerInfo(loggerIfTestVerbose()), LoggerDebug(loggerIfTestVerbose()), monitor(func(s stats) {
 		p1Stats = append(p1Stats, s)
 	}))
 	if err != nil {
@@ -143,7 +157,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	p2, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur2)
 		return -job.Payload, nil
-	}, Name("p2"), LoggerInfo(log.Default()), LoggerDebug(log.Default()), monitor(func(s stats) {
+	}, Name("p2"), LoggerInfo(loggerIfTestVerbose()), LoggerDebug(loggerIfTestVerbose()), monitor(func(s stats) {
 		p2Stats = append(p2Stats, s)
 	}))
 	if err != nil {
@@ -155,7 +169,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	p3, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (string, error) {
 		time.Sleep(jobDur3)
 		return fmt.Sprintf("%.3f", job.Payload), nil
-	}, Name("p3"), LoggerInfo(log.Default()), LoggerDebug(log.Default()), monitor(func(s stats) {
+	}, Name("p3"), LoggerInfo(loggerIfTestVerbose()), LoggerDebug(loggerIfTestVerbose()), monitor(func(s stats) {
 		p3Stats = append(p3Stats, s)
 	}))
 	if err != nil {
@@ -187,7 +201,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 					break
 				}
 			}
-			log.Printf("[test] submitting job%d - inputPeriodAvg: %v\n", i, inputPeriodAvg)
+			logger.Printf("[test] submitting job%d - inputPeriodAvg: %v\n", i, inputPeriodAvg)
 			p1.Submit(float64(i))
 			inputPeriodNow := time.Since(lastSubmitted)
 			lastSubmitted = time.Now()
@@ -203,15 +217,15 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
 		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
-		log.Println("[test] result:", result.Value, "outputPeriodAvg:", outputPeriodAvg)
+		logger.Println("[test] result:", result.Value, "outputPeriodAvg:", outputPeriodAvg)
 	}
 
 	p1WorkersAvg, p1WorkersStd := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
 	p2WorkersAvg, p2WorkersStd := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
 	p3WorkersAvg, p3WorkersStd := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
-	fmt.Printf("p1 workers: avg=%v std=%v\n", p1WorkersAvg, p1WorkersStd)
-	fmt.Printf("p2 workers: avg=%v std=%v\n", p2WorkersAvg, p2WorkersStd)
-	fmt.Printf("p3 workers: avg=%v std=%v\n", p3WorkersAvg, p3WorkersStd)
+	log.Printf("p1 workers: avg=%v std=%v\n", p1WorkersAvg, p1WorkersStd)
+	log.Printf("p2 workers: avg=%v std=%v\n", p2WorkersAvg, p2WorkersStd)
+	log.Printf("p3 workers: avg=%v std=%v\n", p3WorkersAvg, p3WorkersStd)
 	// p1WorkersAvg should be about 1/3 of p3WorkersAvg
 	if p1WorkersAvg < 0.3*p3WorkersAvg {
 		t.Errorf("p1WorkersAvg < %v", 0.3*p3WorkersAvg)
@@ -283,4 +297,11 @@ func sleepCtx(ctx context.Context, dur time.Duration) bool {
 	case <-ticker.C:
 		return false
 	}
+}
+
+func loggerIfTestVerbose() *log.Logger {
+	if testing.Verbose() {
+		return log.Default()
+	}
+	return nil
 }
