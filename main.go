@@ -257,7 +257,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 		p.Results = make(chan Result[I, O], p.maxActiveWorkers)
 	}
 	p.enableWorker = make(chan struct{}, 1)
-	p.disableWorker = make(chan struct{})
+	p.disableWorker = make(chan struct{}, 1)
 	go p.loop()
 	for i := 0; i < p.maxActiveWorkers; i++ {
 		w := newWorker(&p, i, p.fixedWorkers)
