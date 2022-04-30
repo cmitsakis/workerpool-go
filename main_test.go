@@ -72,14 +72,15 @@ func TestPool(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
-		for i := 0; i < 100000; i++ {
+		i := 0
+		for ; i < 100000; i++ {
 			if sleepCtx(ctx, inputPeriod) {
 				break
 			}
 			logger.Printf("[test] submitting job%d\n", i)
 			p.Submit(i)
 		}
-		log.Println("[test] submitted jobs - calling p.StopAndWait()")
+		log.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
 		stopped = time.Now()
 		p.StopAndWait()
 		logger.Println("[test] p.StopAndWait() returned")
@@ -188,8 +189,9 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
+		i := 0
 	loop:
-		for i := 0; i < 10000; i++ {
+		for ; i < 10000; i++ {
 			if inputPeriod == 0 {
 				select {
 				case <-ctx.Done():
@@ -207,7 +209,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 			lastSubmitted = time.Now()
 			inputPeriodAvg = time.Duration(a*float64(inputPeriodNow) + (1-a)*float64(inputPeriodAvg))
 		}
-		log.Println("[test] submitted jobs - calling p1.StopAndWait()")
+		log.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
 		p1.StopAndWait()
 	}()
 
