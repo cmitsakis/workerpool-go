@@ -322,13 +322,7 @@ func (p *Pool[I, O, C]) loop() {
 				if p.loggerDebug != nil {
 					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
 				}
-				// try to enable n workers.
-				for i := 0; i < n; i++ {
-					select {
-					case p.enableWorker <- struct{}{}:
-					default:
-					}
-				}
+				p.enableWorkers(n)
 				jobIDWhenLastEnabledWorker = jobID
 			}
 		}
@@ -349,15 +343,7 @@ func (p *Pool[I, O, C]) loop() {
 					if p.loggerDebug != nil {
 						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, n)
 					}
-					// try to disable n workers.
-					for i := 0; i < n; i++ {
-						select {
-						case p.disableWorker <- struct{}{}:
-						default:
-							// no worker is listening to the disabledWorker channel so write will be lost but this is not a problem
-							// it means all workers are busy so maybe we shouldn't disable any worker
-						}
-					}
+					p.disableWorkers(n)
 					doneCounterWhenLastDisabledWorker = doneCounter
 				}
 			}
@@ -370,18 +356,7 @@ func (p *Pool[I, O, C]) loop() {
 			if p.loggerDebug != nil {
 				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] no active worker. try to enable new worker", doneCounter)
 			}
-		drainLoop:
-			for {
-				select {
-				case <-p.disableWorker:
-				default:
-					break drainLoop
-				}
-			}
-			select {
-			case p.enableWorker <- struct{}{}:
-			default:
-			}
+			p.enableWorkers(1)
 		}
 		if nJobsInSystem >= p.maxActiveWorkers {
 			// if there are p.maxActiveWorkers jobs don't accept new jobs
@@ -449,15 +424,48 @@ func (p *Pool[I, O, C]) writeResultAndDisableWorkersIfBlocked(result Result[I, O
 			if p.loggerDebug != nil {
 				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, int(concurrency)/2)
 			}
-			for i := 0; i < int(concurrency)/2; i++ {
-				select {
-				case p.disableWorker <- struct{}{}:
-				default:
-				}
-			}
+			p.disableWorkers(int(concurrency)/2)
 		}
 		p.Results <- result
 		return true
+	}
+}
+
+func (p *Pool[I, O, C]) disableWorkers(n int) {
+	// drain p.enableWorker channel
+loop:
+	for {
+		select {
+		case <-p.enableWorker:
+		default:
+			break loop
+		}
+	}
+	// try to disable n workers
+	for i := 0; i < n; i++ {
+		select {
+		case p.disableWorker <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (p *Pool[I, O, C]) enableWorkers(n int) {
+	// drain p.disableWorker channel
+loop:
+	for {
+		select {
+		case <-p.disableWorker:
+		default:
+			break loop
+		}
+	}
+	// try to enable n workers
+	for i := 0; i < n; i++ {
+		select {
+		case p.enableWorker <- struct{}{}:
+		default:
+		}
 	}
 }
 
