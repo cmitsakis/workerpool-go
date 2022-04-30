@@ -57,7 +57,7 @@ func TestPool(t *testing.T) {
 		pStats = append(pStats, s)
 	}))
 	if err != nil {
-		log.Printf("NewPool() failed: %s", err)
+		t.Errorf("failed to create pool: %s", err)
 		return
 	}
 	started := time.Now()
@@ -135,7 +135,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 		p1Stats = append(p1Stats, s)
 	}))
 	if err != nil {
-		log.Printf("NewPoolSimple() failed: %s", err)
+		t.Errorf("failed to create pool p1: %s", err)
 		return
 	}
 
@@ -147,7 +147,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 		p2Stats = append(p2Stats, s)
 	}))
 	if err != nil {
-		log.Printf("NewPoolSimple() failed: %s", err)
+		t.Errorf("failed to create pool p2: %s", err)
 		return
 	}
 
@@ -159,7 +159,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 		p3Stats = append(p3Stats, s)
 	}))
 	if err != nil {
-		log.Printf("NewPoolSimple() failed: %s", err)
+		t.Errorf("failed to create pool p3: %s", err)
 		return
 	}
 
