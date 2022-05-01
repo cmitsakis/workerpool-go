@@ -284,12 +284,19 @@ func (p *Pool[I, O, C]) loop() {
 	var doneCounterWhenResultsFull int
 	var nJobsInSystem int
 	var jobDone bool
+	// calculate decay factor "a"
+	// of the exponentially weighted moving average
+	// of loadAvg
+	window := p.maxActiveWorkers/5
+	a := 2/(float64(window)+1)
+	// window2 is used as the number of jobs that have to pass
+	// before we enable or disable workers again
+	window2 := 2*window
 	for p.jobsNew != nil || p.jobsDone != nil {
 		concurrency := atomic.LoadInt32(&p.concurrency)
 		if concurrency > 0 {
 			// concurrency > 0 so we can divide
 			loadNow := float64(nJobsInSystem) / float64(concurrency)
-			const a = 0.1
 			loadAvg = a*loadNow + (1-a)*loadAvg
 			if p.loggerDebug != nil {
 				nJobsProcessing := atomic.LoadInt32(&p.nJobsProcessing)
@@ -309,7 +316,7 @@ func (p *Pool[I, O, C]) loop() {
 				DoneCounter:   doneCounter,
 			})
 		}
-		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > 20 && len(p.Results) == 0 {
+		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > window2 && len(p.Results) == 0 {
 			// if load is high, and we haven't enabled a worker recently, and len(p.Results) == 0, enable n workers
 			// n = number of workers we should enable
 			// find n such that:
@@ -327,7 +334,7 @@ func (p *Pool[I, O, C]) loop() {
 			}
 		}
 		if !p.fixedWorkers && concurrency > 0 && jobDone {
-			if loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > 20 {
+			if loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > window2 {
 				// if load is low and we didn't disable a worker recently, disable n workers
 				// n = number of workers we should disable
 				// find n such that:
@@ -370,7 +377,7 @@ func (p *Pool[I, O, C]) loop() {
 				continue
 			}
 			if p.Results != nil {
-				blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull)
+				blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull, window2)
 				if blocked {
 					doneCounterWhenResultsFull = doneCounter
 				}
@@ -394,7 +401,7 @@ func (p *Pool[I, O, C]) loop() {
 					continue
 				}
 				if p.Results != nil {
-					blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull)
+					blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull, window2)
 					if blocked {
 						doneCounterWhenResultsFull = doneCounter
 					}
@@ -413,12 +420,12 @@ func (p *Pool[I, O, C]) loop() {
 	}
 }
 
-func (p *Pool[I, O, C]) writeResultAndDisableWorkersIfBlocked(result Result[I, O], doneCounter, doneCounterWhenResultsFull int) bool {
+func (p *Pool[I, O, C]) writeResultAndDisableWorkersIfBlocked(result Result[I, O], doneCounter, doneCounterWhenResultsFull, window2 int) bool {
 	select {
 	case p.Results <- result:
 		return false
 	default:
-		if doneCounter-doneCounterWhenResultsFull > 20 {
+		if doneCounter-doneCounterWhenResultsFull > window2 {
 			// do not disable any workers if we did so recently
 			concurrency := atomic.LoadInt32(&p.concurrency)
 			if p.loggerDebug != nil {
