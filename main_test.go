@@ -118,19 +118,31 @@ func TestPool(t *testing.T) {
 	}
 }
 
-func TestPipelineLongInputPeriod(t *testing.T) {
-	testPipeline(t, 20*time.Millisecond)
+func TestPipeline10WorkersLongInputPeriod(t *testing.T) {
+	testPipeline(t, 20*time.Millisecond, 10)
 }
 
-func TestPipelineMediumInputPeriod(t *testing.T) {
-	testPipeline(t, 10*time.Millisecond)
+func TestPipeline10WorkersMediumInputPeriod(t *testing.T) {
+	testPipeline(t, 10*time.Millisecond, 10)
 }
 
-func TestPipelineShortInputPeriod(t *testing.T) {
-	testPipeline(t, 0)
+func TestPipeline10WorkersZeroInputPeriod(t *testing.T) {
+	testPipeline(t, 0, 10)
 }
 
-func testPipeline(t *testing.T, inputPeriod time.Duration) {
+func TestPipeline100WorkersLongInputPeriod(t *testing.T) {
+	testPipeline(t, 20*time.Millisecond, 100)
+}
+
+func TestPipeline100WorkersMediumInputPeriod(t *testing.T) {
+	testPipeline(t, 10*time.Millisecond, 100)
+}
+
+func TestPipeline100WorkersZeroInputPeriod(t *testing.T) {
+	testPipeline(t, 0, 100)
+}
+
+func testPipeline(t *testing.T, inputPeriod time.Duration, numOfWorkers int) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.Default()
@@ -138,16 +150,16 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 		logger = log.New(io.Discard, "", 0)
 	}
 
-	const jobDur1 = 333 * time.Millisecond
-	const jobDur2 = 666 * time.Millisecond
-	const jobDur3 = 1000 * time.Millisecond
+	jobDur1 := 3333 * time.Duration(numOfWorkers) * time.Microsecond
+	jobDur2 := 6666 * time.Duration(numOfWorkers) * time.Microsecond
+	jobDur3 := 10000 * time.Duration(numOfWorkers) * time.Microsecond
 
 	var p1Stats []stats
 	var p2Stats []stats
 	var p3Stats []stats
 
 	// stage 1: calculate square root
-	p1, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
+	p1, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur1)
 		return math.Sqrt(job.Payload), nil
 	}, Name("p1"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
@@ -159,7 +171,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	}
 
 	// stage 2: negate number
-	p2, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (float64, error) {
+	p2, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur2)
 		return -job.Payload, nil
 	}, Name("p2"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
@@ -171,7 +183,7 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	}
 
 	// stage 3: convert float to string
-	p3, err := NewPoolWithResults(100, func(job Job[float64], workerID int) (string, error) {
+	p3, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (string, error) {
 		time.Sleep(jobDur3)
 		return fmt.Sprintf("%.3f", job.Payload), nil
 	}, Name("p3"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
@@ -250,11 +262,11 @@ func testPipeline(t *testing.T, inputPeriod time.Duration) {
 	var p3WorkersExpected float64
 	if inputPeriod > 0 {
 		p3WorkersExpected = float64(jobDur3 / inputPeriod)
-		if p3WorkersExpected > 100 {
-			p3WorkersExpected = 100
+		if p3WorkersExpected > float64(numOfWorkers) {
+			p3WorkersExpected = float64(numOfWorkers)
 		}
 	} else {
-		p3WorkersExpected = 100
+		p3WorkersExpected = float64(numOfWorkers)
 	}
 	if p3WorkersAvg < 0.9*p3WorkersExpected {
 		t.Errorf("p3WorkersAvg < 0.9*%v", p3WorkersExpected)
