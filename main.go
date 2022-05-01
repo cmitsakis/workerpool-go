@@ -287,11 +287,11 @@ func (p *Pool[I, O, C]) loop() {
 	// calculate decay factor "a"
 	// of the exponentially weighted moving average
 	// of loadAvg
-	window := p.maxActiveWorkers/5
-	a := 2/(float64(window)+1)
+	window := p.maxActiveWorkers / 5
+	a := 2 / (float64(window) + 1)
 	// window2 is used as the number of jobs that have to pass
 	// before we enable or disable workers again
-	window2 := 2*window
+	window2 := 2 * window
 	for p.jobsNew != nil || p.jobsDone != nil {
 		concurrency := atomic.LoadInt32(&p.concurrency)
 		if concurrency > 0 {
@@ -428,10 +428,11 @@ func (p *Pool[I, O, C]) writeResultAndDisableWorkersIfBlocked(result Result[I, O
 		if doneCounter-doneCounterWhenResultsFull > window2 {
 			// do not disable any workers if we did so recently
 			concurrency := atomic.LoadInt32(&p.concurrency)
+			n := int(concurrency) / 2
 			if p.loggerDebug != nil {
-				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, int(concurrency)/2)
+				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, n)
 			}
-			p.disableWorkers(int(concurrency)/2)
+			p.disableWorkers(n)
 		}
 		p.Results <- result
 		return true
