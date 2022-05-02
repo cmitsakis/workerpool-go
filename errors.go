@@ -5,6 +5,7 @@ package workerpool
 
 import (
 	"errors"
+	"time"
 )
 
 type behavior interface {
@@ -85,4 +86,45 @@ func ErrorWrapRetryableUnaccounted(err error) error {
 		return nil
 	}
 	return &retryableUnaccounted{Err: err}
+}
+
+type errorWorkerBehavior interface {
+	PauseWorker() time.Duration
+}
+
+func errorPausesWorker(err error) time.Duration {
+	var errWorkerBehavior errorWorkerBehavior
+	if errors.As(err, &errWorkerBehavior) {
+		return errWorkerBehavior.PauseWorker()
+	}
+	return 0
+}
+
+type errorTypePauseWorker struct {
+	Err      error
+	duration time.Duration
+}
+
+func (err errorTypePauseWorker) Error() string {
+	return err.Err.Error()
+}
+
+func (err errorTypePauseWorker) Unwrap() error {
+	return err.Err
+}
+
+func (err errorTypePauseWorker) Retryable() bool {
+	return true
+}
+
+func (err errorTypePauseWorker) PauseWorker() time.Duration {
+	return err.duration
+}
+
+// ErrorWrapPauseWorker pauses the worker for a duration of time.
+func ErrorWrapPauseWorker(dur time.Duration, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &errorTypePauseWorker{Err: err, duration: dur}
 }

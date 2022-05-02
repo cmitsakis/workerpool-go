@@ -660,7 +660,6 @@ loop:
 			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
 			if !w.alwaysEnabled {
 				w.idleTicker.Stop()
-				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
 			}
 			if err != nil && errorIsRetryable(err) && (j.Attempt < w.pool.retries || errorIsUnaccounted(err)) {
 				if !errorIsUnaccounted(err) {
@@ -671,9 +670,34 @@ loop:
 				w.pool.jobsDone <- Result[I, O]{Job: j, Value: resultValue, Error: err}
 				w.pool.wgJobs.Done()
 			}
+			if err != nil {
+				pauseDuration := errorPausesWorker(err)
+				if pauseDuration > 0 {
+					deinit()
+					w.pool.enableWorkers(1)
+					ctxCanceled := sleepCtx(ctx, pauseDuration)
+					if ctxCanceled {
+						break loop
+					}
+				}
+			}
+			if !w.alwaysEnabled {
+				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+			}
 		}
 	}
 	if w.pool.loggerDebug != nil {
 		w.pool.loggerDebug.Printf("[workerpool/worker%d] finished\n", w.id)
+	}
+}
+
+func sleepCtx(ctx context.Context, dur time.Duration) bool {
+	ticker := time.NewTicker(dur)
+	defer ticker.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-ticker.C:
+		return false
 	}
 }

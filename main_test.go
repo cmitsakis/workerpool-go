@@ -321,17 +321,6 @@ func processStats(statsArray []stats, from time.Time, to time.Time) (float64, fl
 	return workersAvg, workersStd
 }
 
-func sleepCtx(ctx context.Context, dur time.Duration) bool {
-	ticker := time.NewTicker(dur)
-	defer ticker.Stop()
-	select {
-	case <-ctx.Done():
-		return true
-	case <-ticker.C:
-		return false
-	}
-}
-
 func loggerIfDebugEnabled() *log.Logger {
 	if *flagDebugLogs {
 		return log.Default()
