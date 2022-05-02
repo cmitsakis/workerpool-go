@@ -101,7 +101,7 @@ func TestPool(t *testing.T) {
 	}
 
 	pWorkersAvg, pWorkersStd := processStats(pStats, started.Add(30*time.Second), stopped)
-	log.Printf("pool workers: avg=%v std=%v\n", pWorkersAvg, pWorkersStd)
+	t.Logf("pool workers: avg=%v std=%v\n", pWorkersAvg, pWorkersStd)
 	// expectedNumOfWorkers = effectiveJobDur/inputPeriod
 	// where effectiveJobDur = jobDur / successRate
 	// because each job is tried 1/successRate on average
