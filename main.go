@@ -5,6 +5,7 @@
 package workerpool
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -50,6 +51,7 @@ type Pool[I, O, C any] struct {
 	enableWorker     chan struct{}
 	disableWorker    chan struct{}
 	monitor          func(s stats)
+	cancelWorkers    context.CancelFunc
 }
 
 type poolConfig struct {
@@ -233,6 +235,8 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 		}
 	}
 
+	ctxWorkers, cancelWorkers := context.WithCancel(context.Background())
+
 	p := Pool[I, O, C]{
 		retries:          config.retries,
 		reinitDelay:      config.reinitDelay,
@@ -247,6 +251,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 		handler:          handler,
 		workerInit:       workerInit,
 		workerDeinit:     workerDeinit,
+		cancelWorkers:    cancelWorkers,
 	}
 	if p.maxActiveWorkers == 0 {
 		return nil, fmt.Errorf("maxActiveWorkers = 0")
@@ -264,7 +269,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	for i := 0; i < p.maxActiveWorkers; i++ {
 		w := newWorker(&p, i, p.fixedWorkers)
 		p.wgWorkers.Add(1)
-		go w.loop()
+		go w.loop(ctxWorkers)
 	}
 	return &p, nil
 }
@@ -429,8 +434,6 @@ func (p *Pool[I, O, C]) loop() {
 		}
 	}
 	close(p.jobsQueue)
-	close(p.enableWorker)
-	close(p.disableWorker)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/loop] finished")
 	}
@@ -508,11 +511,14 @@ func (p *Pool[I, O, C]) StopAndWait() {
 		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for all jobs to finish")
 	}
 	p.wgJobs.Wait()
+	p.cancelWorkers()
 	close(p.jobsDone)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for all workers to finish")
 	}
 	p.wgWorkers.Wait()
+	close(p.enableWorker)
+	close(p.disableWorker)
 	close(p.concurrencyIs0)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] finished")
@@ -559,7 +565,7 @@ func newWorker[I, O, C any](p *Pool[I, O, C], id int, alwaysEnabled bool) *worke
 	}
 }
 
-func (w *worker[I, O, C]) loop() {
+func (w *worker[I, O, C]) loop(ctx context.Context) {
 	enabled := false
 	deinit := func() {
 		if w.idleTicker != nil {
@@ -599,9 +605,13 @@ loop:
 				w.idleTicker.Stop()
 			}
 			if !w.alwaysEnabled {
-				_, ok := <-w.pool.enableWorker
-				if !ok {
-					break
+				select {
+				case _, ok := <-w.pool.enableWorker:
+					if !ok {
+						break loop
+					}
+				case <-ctx.Done():
+					break loop
 				}
 			}
 			enabled = true
@@ -634,6 +644,8 @@ loop:
 		select {
 		case <-w.idleTicker.C:
 			deinit()
+		case <-ctx.Done():
+			break loop
 		case _, ok := <-w.pool.disableWorker:
 			if !ok {
 				break loop
