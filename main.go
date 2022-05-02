@@ -613,7 +613,11 @@ loop:
 				connection, err := w.pool.workerInit(w.id)
 				if err != nil {
 					w.pool.loggerInfo.Printf("[workerpool/worker%d] workerInit failed: %s\n", w.id, err)
+					enabled = false
+					atomic.AddInt32(&w.pool.concurrency, -1)
 					time.Sleep(w.pool.reinitDelay)
+					// this worker failed to start, so enable another worker
+					w.pool.enableWorkers(1)
 					continue
 				}
 				w.connection = &connection
