@@ -180,7 +180,7 @@ func NewPoolWithInit[I, C any](maxActiveWorkers int, handler func(job Job[I], wo
 	handler2 := func(job Job[I], workerID int, connection C) (struct{}, error) {
 		return struct{}{}, handler(job, workerID, connection)
 	}
-	return newPool[I, struct{}, C](maxActiveWorkers, handler2, nil, nil, false, options...)
+	return newPool[I, struct{}, C](maxActiveWorkers, handler2, workerInit, workerDeinit, false, options...)
 }
 
 // NewPoolWithResults creates a new worker pool with Results channel. You should consume from this channel until it is closed.
