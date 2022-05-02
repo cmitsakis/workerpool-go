@@ -39,6 +39,7 @@ type Pool[I, O, C any] struct {
 	workerInit       func(workerID int) (C, error)
 	workerDeinit     func(workerID int, connection C) error
 	concurrency      int32
+	concurrencyIs0   chan struct{}
 	jobsNew          chan I
 	jobsQueue        chan Job[I]
 	wgJobs           sync.WaitGroup
@@ -256,6 +257,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	if createResultsChannel {
 		p.Results = make(chan Result[I, O], p.maxActiveWorkers)
 	}
+	p.concurrencyIs0 = make(chan struct{}, 1)
 	p.enableWorker = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{}, 1)
 	go p.loop()
@@ -371,20 +373,28 @@ func (p *Pool[I, O, C]) loop() {
 			// that way we make sure nJobsInSystem < len(p.jobsQueue)
 			// so writes to p.jobsQueue don't block
 			// blocking writes to p.jobsQueue would cause deadlock
-			result, ok := <-p.jobsDone
-			if !ok {
-				p.jobsDone = nil
-				continue
-			}
-			if p.Results != nil {
-				blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull, window2)
-				if blocked {
-					doneCounterWhenResultsFull = doneCounter
+			select {
+			case result, ok := <-p.jobsDone:
+				if !ok {
+					p.jobsDone = nil
+					continue
 				}
+				if p.Results != nil {
+					blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull, window2)
+					if blocked {
+						doneCounterWhenResultsFull = doneCounter
+					}
+				}
+				nJobsInSystem--
+				doneCounter++
+				jobDone = true
+			case _, ok := <- p.concurrencyIs0:
+				if !ok {
+					p.jobsNew = nil
+					continue
+				}
+				p.enableWorkers(1)
 			}
-			nJobsInSystem--
-			doneCounter++
-			jobDone = true
 		} else {
 			select {
 			case payload, ok := <-p.jobsNew:
@@ -409,6 +419,12 @@ func (p *Pool[I, O, C]) loop() {
 				nJobsInSystem--
 				doneCounter++
 				jobDone = true
+			case _, ok := <- p.concurrencyIs0:
+				if !ok {
+					p.jobsNew = nil
+					continue
+				}
+				p.enableWorkers(1)
 			}
 		}
 	}
@@ -497,6 +513,7 @@ func (p *Pool[I, O, C]) StopAndWait() {
 		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for all workers to finish")
 	}
 	p.wgWorkers.Wait()
+	close(p.concurrencyIs0)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] finished")
 	}
@@ -561,6 +578,15 @@ func (w *worker[I, O, C]) loop() {
 			if w.pool.loggerDebug != nil {
 				concurrency := atomic.LoadInt32(&w.pool.concurrency)
 				w.pool.loggerDebug.Printf("[workerpool/worker%d] worker disabled - concurrency %d\n", w.id, concurrency)
+				if concurrency == 0 {
+					// if all workers are disabled, the pool loop might get stuck resulting in a deadlock.
+					// we send a signal to p.concurrencyIs0 so the pool loop can continue and enable one worker.
+					w.pool.loggerDebug.Printf("[workerpool/worker%d] sending to p.concurrencyIs0\n", w.id)
+					select {
+					case w.pool.concurrencyIs0 <- struct{}{}:
+					default:
+					}
+				}
 			}
 		}
 	}
