@@ -620,8 +620,10 @@ loop:
 				w.idleTicker.Stop()
 				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
 			}
-			if err != nil && errorIsRetryable(err) && j.Attempt < w.pool.retries {
-				j.Attempt++
+			if err != nil && errorIsRetryable(err) && (j.Attempt < w.pool.retries || errorIsUnaccounted(err)) {
+				if !errorIsUnaccounted(err) {
+					j.Attempt++
+				}
 				w.pool.jobsQueue <- j
 			} else {
 				w.pool.jobsDone <- Result[I, O]{Job: j, Value: resultValue, Error: err}

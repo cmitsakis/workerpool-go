@@ -43,7 +43,7 @@ func TestPool(t *testing.T) {
 	}
 	const inputPeriod = 10 * time.Millisecond
 	const jobDur = 500 * time.Millisecond
-	const successRate = 0.95
+	const successRate = 0.75
 	var pStats []stats
 	results := make(chan struct{})
 	p, err := NewPoolWithInit(len(workerProfiles), func(job Job[int], workerID int, connection struct{}) error {
@@ -51,7 +51,7 @@ func TestPool(t *testing.T) {
 		logger.Printf("[test/worker%v] job%d started - attempt %d - worker %v\n", workerID, job.ID, job.Attempt, worker)
 		time.Sleep(jobDur)
 		if rand.Float32() > successRate {
-			return ErrorWrapRetryable(fmt.Errorf("job failure"))
+			return ErrorWrapRetryableUnaccounted(fmt.Errorf("job failure"))
 		}
 		results <- struct{}{}
 		return nil
@@ -63,7 +63,7 @@ func TestPool(t *testing.T) {
 		time.Sleep(3 * jobDur)
 		logger.Printf("[test/worker%v] disconnecting\n", workerID)
 		return nil
-	}, Retries(4), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
+	}, LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
 		pStats = append(pStats, s)
 	}))
 	if err != nil {
@@ -72,6 +72,7 @@ func TestPool(t *testing.T) {
 	}
 	started := time.Now()
 	var stopped time.Time
+	var submittedCount int
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
@@ -85,6 +86,7 @@ func TestPool(t *testing.T) {
 		}
 		logger.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
 		t.Logf("submitted %d jobs\n", i)
+		submittedCount = i
 		stopped = time.Now()
 		p.StopAndWait()
 		logger.Println("[test] p.StopAndWait() returned")
@@ -93,11 +95,17 @@ func TestPool(t *testing.T) {
 	const a = 0.1
 	var outputPeriodAvg time.Duration
 	lastReceived := time.Now()
+	var resultsCount int
 	for range results {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
 		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
 		logger.Println("[test] outputPeriodAvg:", outputPeriodAvg)
+		resultsCount++
+	}
+	t.Logf("got %d results\n", resultsCount)
+	if submittedCount != resultsCount {
+		t.Error("submittedCount != resultsCount")
 	}
 
 	pWorkersAvg, pWorkersStd := processStats(pStats, started.Add(30*time.Second), stopped)
