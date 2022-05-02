@@ -135,7 +135,8 @@ func main() {
 		}
 		resp, err := client.Get(job.Payload)
 		if err != nil {
-			return nil, fmt.Errorf("client.Get failed: %w", err)
+			// mark error as retryable
+			return nil, workerpool.ErrorWrapRetryable(fmt.Errorf("client.Get failed: %w", err))
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 399 {
 			return nil, fmt.Errorf("HTTP status code %d", resp.StatusCode)
@@ -150,7 +151,7 @@ func main() {
 	}, func(workerID int, tr *http.Transport) error { // worker deinit function
 		tr.CloseIdleConnections()
 		return nil
-	}, workerpool.Retries(2))
+	}, workerpool.Retries(2)) // retry twice if error is retryable
 
 	// pool p2 processes the content of the URLs downloaded by p1
 	p2, _ := workerpool.NewPoolWithResults(1, func(job workerpool.Job[[]byte], workerID int) (int, error) {
