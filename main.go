@@ -393,7 +393,7 @@ func (p *Pool[I, O, C]) loop() {
 				nJobsInSystem--
 				doneCounter++
 				jobDone = true
-			case _, ok := <- p.concurrencyIs0:
+			case _, ok := <-p.concurrencyIs0:
 				if !ok {
 					p.jobsNew = nil
 					continue
@@ -424,7 +424,7 @@ func (p *Pool[I, O, C]) loop() {
 				nJobsInSystem--
 				doneCounter++
 				jobDone = true
-			case _, ok := <- p.concurrencyIs0:
+			case _, ok := <-p.concurrencyIs0:
 				if !ok {
 					p.jobsNew = nil
 					continue
