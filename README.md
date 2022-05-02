@@ -1,6 +1,6 @@
 # workerpool
 
-Worker pool with auto-scaling, backpressure, and easy composability of pools into pipelines. Uses Go 1.18 generics.
+Worker pool library with auto-scaling, backpressure, and easy composability of pools into pipelines. Uses Go 1.18 generics.
 
 **backpressure:**
 The pool includes a queue with limited capacity.

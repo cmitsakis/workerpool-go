@@ -1,7 +1,7 @@
 // Copyright (C) 2022 Charalampos Mitsakis (go.mitsakis.org/workerpool)
 // Licensed under the Apache License, Version 2.0
 
-// Generic worker pool with limited concurrency, backpressure, and dynamically resizable number of workers.
+// Generic worker pool (work queue) library with auto-scaling, backpressure, and easy composability of pools into pipelines.
 package workerpool
 
 import (
