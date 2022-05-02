@@ -57,10 +57,16 @@ func TestPool(t *testing.T) {
 		return nil
 	}, func(workerID int) (struct{}, error) {
 		time.Sleep(3 * jobDur)
+		if rand.Float32() > 0.9 {
+			return struct{}{}, fmt.Errorf("worker init failure")
+		}
 		logger.Printf("[test/worker%v] connecting\n", workerID)
 		return struct{}{}, nil
 	}, func(workerID int, connection struct{}) error {
 		time.Sleep(3 * jobDur)
+		if rand.Float32() > 0.9 {
+			return fmt.Errorf("worker deinit failure")
+		}
 		logger.Printf("[test/worker%v] disconnecting\n", workerID)
 		return nil
 	}, LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
@@ -121,8 +127,8 @@ func TestPool(t *testing.T) {
 		t.Errorf("pWorkersAvg > 1.1*%v", expectedNumOfWorkers)
 	}
 	// fail if standard deviation is too high
-	if pWorkersStd/pWorkersAvg > 0.05 {
-		t.Error("pWorkersStd/pWorkersAvg > 0.05")
+	if pWorkersStd/pWorkersAvg > 0.1 {
+		t.Error("pWorkersStd/pWorkersAvg > 0.1")
 	}
 }
 
