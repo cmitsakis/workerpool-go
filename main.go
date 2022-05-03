@@ -578,24 +578,28 @@ func (w *worker[I, O, C]) loop(ctx context.Context) {
 		if enabled {
 			enabled = false
 			atomic.AddInt32(&w.pool.concurrency, -1)
-			if w.pool.workerDeinit != nil {
+			if w.pool.workerDeinit != nil && w.connection != nil {
 				err := w.pool.workerDeinit(w.id, *w.connection)
 				if err != nil {
-					w.pool.loggerInfo.Printf("[workerpool/worker%d] workerDeinit failed: %s\n", w.id, err)
+					if w.pool.loggerInfo != nil {
+						w.pool.loggerInfo.Printf("[workerpool/worker%d] workerDeinit failed: %s\n", w.id, err)
+					}
 				}
 				w.connection = nil
 			}
+			concurrency := atomic.LoadInt32(&w.pool.concurrency)
 			if w.pool.loggerDebug != nil {
-				concurrency := atomic.LoadInt32(&w.pool.concurrency)
 				w.pool.loggerDebug.Printf("[workerpool/worker%d] worker disabled - concurrency %d\n", w.id, concurrency)
-				if concurrency == 0 {
-					// if all workers are disabled, the pool loop might get stuck resulting in a deadlock.
-					// we send a signal to p.concurrencyIs0 so the pool loop can continue and enable one worker.
+			}
+			if concurrency == 0 {
+				// if all workers are disabled, the pool loop might get stuck resulting in a deadlock.
+				// we send a signal to p.concurrencyIs0 so the pool loop can continue and enable one worker.
+				if w.pool.loggerDebug != nil {
 					w.pool.loggerDebug.Printf("[workerpool/worker%d] sending to p.concurrencyIs0\n", w.id)
-					select {
-					case w.pool.concurrencyIs0 <- struct{}{}:
-					default:
-					}
+				}
+				select {
+				case w.pool.concurrencyIs0 <- struct{}{}:
+				default:
 				}
 			}
 		}
@@ -621,12 +625,16 @@ loop:
 			enabled = true
 			atomic.AddInt32(&w.pool.concurrency, 1)
 			if w.pool.loggerDebug != nil {
-				w.pool.loggerDebug.Printf("[workerpool/worker%d] worker enabled\n", w.id)
+				if w.pool.loggerDebug != nil {
+					w.pool.loggerDebug.Printf("[workerpool/worker%d] worker enabled\n", w.id)
+				}
 			}
 			if w.pool.workerInit != nil {
 				connection, err := w.pool.workerInit(w.id)
 				if err != nil {
-					w.pool.loggerInfo.Printf("[workerpool/worker%d] workerInit failed: %s\n", w.id, err)
+					if w.pool.loggerInfo != nil {
+						w.pool.loggerInfo.Printf("[workerpool/worker%d] workerInit failed: %s\n", w.id, err)
+					}
 					enabled = false
 					atomic.AddInt32(&w.pool.concurrency, -1)
 					time.Sleep(w.pool.reinitDelay)
