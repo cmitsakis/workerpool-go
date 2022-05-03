@@ -132,31 +132,29 @@ func TestPool(t *testing.T) {
 	}
 }
 
-func TestPipeline10WorkersLongInputPeriod(t *testing.T) {
-	testPipeline(t, 20*time.Millisecond, 10)
+func TestPipeline(t *testing.T) {
+	var numOfWorkersSlice []int
+	if testing.Short() == true {
+		numOfWorkersSlice = []int{10, 100}
+	} else {
+		numOfWorkersSlice = []int{5, 10, 20, 30, 50, 75, 100, 150, 200, 500}
+	}
+	var inputPeriodSlice []time.Duration
+	if testing.Short() == true {
+		inputPeriodSlice = []time.Duration{0}
+	} else {
+		inputPeriodSlice = []time.Duration{20 * time.Millisecond, 10 * time.Millisecond, 0}
+	}
+	for _, w := range numOfWorkersSlice {
+		for _, p := range inputPeriodSlice {
+			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
+				testPipelineCase(t, w, p)
+			})
+		}
+	}
 }
 
-func TestPipeline10WorkersMediumInputPeriod(t *testing.T) {
-	testPipeline(t, 10*time.Millisecond, 10)
-}
-
-func TestPipeline10WorkersZeroInputPeriod(t *testing.T) {
-	testPipeline(t, 0, 10)
-}
-
-func TestPipeline100WorkersLongInputPeriod(t *testing.T) {
-	testPipeline(t, 20*time.Millisecond, 100)
-}
-
-func TestPipeline100WorkersMediumInputPeriod(t *testing.T) {
-	testPipeline(t, 10*time.Millisecond, 100)
-}
-
-func TestPipeline100WorkersZeroInputPeriod(t *testing.T) {
-	testPipeline(t, 0, 100)
-}
-
-func testPipeline(t *testing.T, inputPeriod time.Duration, numOfWorkers int) {
+func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.Default()
