@@ -89,6 +89,8 @@ func FixedWorkers() func(c *poolConfig) error {
 }
 
 // Retries sets the number of times a job will be retried if it fails with a retryable error (see function ErrorWrapRetryable).
+//
+// Default value = 1
 func Retries(n int) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.retries = n
@@ -203,6 +205,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	// default configuration
 	config := poolConfig{
 		setOptions:  make(map[int]struct{}),
+		retries:     1,
 		reinitDelay: time.Second,
 		idleTimeout: 20 * time.Second,
 		targetLoad:  0.9,
