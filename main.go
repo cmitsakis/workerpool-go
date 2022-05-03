@@ -52,6 +52,7 @@ type Pool[I, O, C any] struct {
 	disableWorker    chan struct{}
 	monitor          func(s stats)
 	cancelWorkers    context.CancelFunc
+	loopDone         chan struct{}
 }
 
 type poolConfig struct {
@@ -265,6 +266,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	p.concurrencyIs0 = make(chan struct{}, 1)
 	p.enableWorker = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{}, 1)
+	p.loopDone = make(chan struct{})
 	go p.loop()
 	for i := 0; i < p.maxActiveWorkers; i++ {
 		w := newWorker(&p, i, p.fixedWorkers)
@@ -437,6 +439,7 @@ func (p *Pool[I, O, C]) loop() {
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/loop] finished")
 	}
+	p.loopDone <- struct{}{}
 }
 
 func (p *Pool[I, O, C]) writeResultAndDisableWorkersIfBlocked(result Result[I, O], doneCounter, doneCounterWhenResultsFull, window2 int) bool {
@@ -517,6 +520,7 @@ func (p *Pool[I, O, C]) StopAndWait() {
 		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for all workers to finish")
 	}
 	p.wgWorkers.Wait()
+	<-p.loopDone
 	close(p.enableWorker)
 	close(p.disableWorker)
 	close(p.concurrencyIs0)
