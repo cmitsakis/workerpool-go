@@ -539,6 +539,11 @@ func (p *Pool[I, O, C]) StopAndWait() {
 // and submits them to the second, if there is no error,
 // or passes them to the handleError function if there is an error.
 //
+// Once you call StopAndWait() on the first pool,
+// after a while p1.Results get closed,
+// so this loop exits and p2.StopAndWait() is called.
+// This way StopAndWait() propagates through the pipeline.
+//
 // WARNING: Should only be used if the first pool has a not-nil Results channel.
 // Which means it was created by the constructors NewPoolWithResults() or NewPoolWithResultsAndInit().
 func ConnectPools[I, O, C, O2, C2 any](p1 *Pool[I, O, C], p2 *Pool[O, O2, C2], handleError func(Result[I, O])) {
