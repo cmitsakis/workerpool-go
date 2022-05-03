@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -299,11 +298,14 @@ func (p *Pool[I, O, C]) loop() {
 	// calculate decay factor "a"
 	// of the exponentially weighted moving average
 	// of loadAvg
-	window := p.maxActiveWorkers / 5
+	window := p.maxActiveWorkers / 2
+	if window < 5 {
+		window = 5
+	}
 	a := 2 / (float64(window) + 1)
 	// window2 is used as the number of jobs that have to pass
 	// before we enable or disable workers again
-	window2 := 2 * window
+	window2 := p.maxActiveWorkers
 	for p.jobsNew != nil || p.jobsDone != nil {
 		concurrency := atomic.LoadInt32(&p.concurrency)
 		if concurrency > 0 {
@@ -335,8 +337,7 @@ func (p *Pool[I, O, C]) loop() {
 			// loadAvg < p.targetLoad*(concurrency+n)/concurrency
 			// loadAvg*concurrency/p.targetLoad < concurrency+n
 			// loadAvg*concurrency/p.targetLoad - concurrency < n
-			// calculate square root to keep n low if loadAvg is high (otherwise we might enable too many workers)
-			n := int(math.Sqrt(loadAvg*float64(concurrency)/p.targetLoad - float64(concurrency)))
+			n := int(loadAvg*float64(concurrency)/p.targetLoad - float64(concurrency))
 			if n > 0 {
 				if p.loggerDebug != nil {
 					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
