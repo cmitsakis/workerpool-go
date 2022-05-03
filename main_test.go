@@ -261,18 +261,18 @@ func testPipeline(t *testing.T, inputPeriod time.Duration, numOfWorkers int) {
 	t.Logf("[pool=p3] workers: avg=%v std=%v\n", p3WorkersAvg, p3WorkersStd)
 
 	// p1WorkersAvg should be about 1/3 of p3WorkersAvg
-	if p1WorkersAvg < 0.3*p3WorkersAvg - 1 {
-		t.Errorf("p1WorkersAvg < %v", 0.3*p3WorkersAvg - 1)
+	if p1WorkersAvg < 0.3*p3WorkersAvg-1 {
+		t.Errorf("p1WorkersAvg < %v", 0.3*p3WorkersAvg-1)
 	}
-	if p1WorkersAvg > 0.4*p3WorkersAvg + 1 {
-		t.Errorf("p1WorkersAvg > %v", 0.4*p3WorkersAvg + 1)
+	if p1WorkersAvg > 0.4*p3WorkersAvg+1 {
+		t.Errorf("p1WorkersAvg > %v", 0.4*p3WorkersAvg+1)
 	}
 	// p2WorkersAvg should be about 2/3 of p3WorkersAvg
-	if p2WorkersAvg < 0.6*p3WorkersAvg - 1 {
-		t.Errorf("p2WorkersAvg < %v", 0.6*p3WorkersAvg - 1)
+	if p2WorkersAvg < 0.6*p3WorkersAvg-1 {
+		t.Errorf("p2WorkersAvg < %v", 0.6*p3WorkersAvg-1)
 	}
-	if p2WorkersAvg > 0.7*p3WorkersAvg + 1 {
-		t.Errorf("p2WorkersAvg > %v", 0.7*p3WorkersAvg + 1)
+	if p2WorkersAvg > 0.7*p3WorkersAvg+1 {
+		t.Errorf("p2WorkersAvg > %v", 0.7*p3WorkersAvg+1)
 	}
 	// p3WorkersAvg should be about p3WorkersExpected
 	var p3WorkersExpected float64
@@ -284,11 +284,11 @@ func testPipeline(t *testing.T, inputPeriod time.Duration, numOfWorkers int) {
 	} else {
 		p3WorkersExpected = float64(numOfWorkers)
 	}
-	if p3WorkersAvg < 0.9*p3WorkersExpected - 1 {
-		t.Errorf("p3WorkersAvg < 0.9*%v - 1 = %v", p3WorkersExpected, 0.9*p3WorkersExpected - 1)
+	if p3WorkersAvg < 0.9*p3WorkersExpected-1 {
+		t.Errorf("p3WorkersAvg < 0.9*%v-1 = %v", p3WorkersExpected, 0.9*p3WorkersExpected-1)
 	}
-	if p3WorkersAvg > 1.1*p3WorkersExpected + 1 {
-		t.Errorf("p3WorkersAvg > 1.1*%v + 1 = %v", p3WorkersExpected, 1.1*p3WorkersExpected + 1)
+	if p3WorkersAvg > 1.1*p3WorkersExpected+1 {
+		t.Errorf("p3WorkersAvg > 1.1*%v + 1 = %v", p3WorkersExpected, 1.1*p3WorkersExpected+1)
 	}
 
 	// fail if standard deviation is too high
