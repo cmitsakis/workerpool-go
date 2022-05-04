@@ -148,23 +148,23 @@ func TestPipeline(t *testing.T) {
 
 	var resultsCountSum int
 	var workersNumErrorSum float64
-	var wordersNumRSDSum float64
+	var workersNumRSDSum float64
 	for _, w := range numOfWorkersSlice {
 		for _, p := range inputPeriodSlice {
 			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
-				resultsCount, workersNumError, wordersNumRSD := testPipelineCase(t, w, p)
+				resultsCount, workersNumError, workersNumRSD := testPipelineCase(t, w, p)
 				resultsCountSum += resultsCount
 				workersNumErrorSum += workersNumError
-				wordersNumRSDSum += wordersNumRSD
+				workersNumRSDSum += workersNumRSD
 			})
 		}
 	}
 	resultsCountAVG := resultsCountSum / (len(numOfWorkersSlice) * len(inputPeriodSlice))
 	workersNumErrorAVG := workersNumErrorSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
-	wordersNumRSDAVG := wordersNumRSDSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
+	workersNumRSDAVG := workersNumRSDSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
 	t.Logf("resultsCount average: %v", resultsCountAVG)
 	t.Logf("workersNumError average: %v", workersNumErrorAVG)
-	t.Logf("wordersNumRSD average: %v", wordersNumRSDAVG)
+	t.Logf("workersNumRSD average: %v", workersNumRSDAVG)
 }
 
 func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64) {
@@ -323,10 +323,10 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	}
 
 	workersNumError := math.Sqrt(math.Pow(p1WorkersAVG-p1WorkersExpected, 2)+math.Pow(p2WorkersAVG-p2WorkersExpected, 2)+math.Pow(p3WorkersAVG-p3WorkersExpected, 2)) / p3WorkersExpected
-	wordersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
+	workersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
 	t.Logf("workersNumError: %v", workersNumError)
-	t.Logf("wordersNumRSD: %v", wordersNumRSD)
-	return resultsCount, workersNumError, wordersNumRSD
+	t.Logf("workersNumRSD: %v", workersNumRSD)
+	return resultsCount, workersNumError, workersNumRSD
 }
 
 // calculates the average and standard deviation of concurrency in the specified time period
