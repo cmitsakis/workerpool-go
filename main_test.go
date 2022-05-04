@@ -145,16 +145,29 @@ func TestPipeline(t *testing.T) {
 	} else {
 		inputPeriodSlice = []time.Duration{20 * time.Millisecond, 10 * time.Millisecond, 0}
 	}
+
+	var resultsCountSum int
+	var workersNumErrorSum float64
+	var wordersNumRSDSum float64
 	for _, w := range numOfWorkersSlice {
 		for _, p := range inputPeriodSlice {
 			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
-				testPipelineCase(t, w, p)
+				resultsCount, workersNumError, wordersNumRSD := testPipelineCase(t, w, p)
+				resultsCountSum += resultsCount
+				workersNumErrorSum += workersNumError
+				wordersNumRSDSum += wordersNumRSD
 			})
 		}
 	}
+	resultsCountAvg := resultsCountSum / (len(numOfWorkersSlice) * len(inputPeriodSlice))
+	workersNumErrorAvg := workersNumErrorSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
+	wordersNumRSDAvg := wordersNumRSDSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
+	t.Logf("resultsCount average: %v", resultsCountAvg)
+	t.Logf("workersNumError average: %v", workersNumErrorAvg)
+	t.Logf("wordersNumRSD average: %v", wordersNumRSDAvg)
 }
 
-func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) {
+func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.Default()
@@ -179,7 +192,7 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	}))
 	if err != nil {
 		t.Errorf("failed to create pool p1: %s", err)
-		return
+		return 0, math.NaN(), math.NaN()
 	}
 
 	// stage 2: negate number
@@ -191,7 +204,7 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	}))
 	if err != nil {
 		t.Errorf("failed to create pool p2: %s", err)
-		return
+		return 0, math.NaN(), math.NaN()
 	}
 
 	// stage 3: convert float to string
@@ -203,7 +216,7 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	}))
 	if err != nil {
 		t.Errorf("failed to create pool p3: %s", err)
-		return
+		return 0, math.NaN(), math.NaN()
 	}
 
 	// connect p1, p2, p3 into a pipeline
@@ -244,11 +257,13 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 
 	var outputPeriodAvg time.Duration
 	lastReceived := time.Now()
+	var resultsCount int
 	for result := range p3.Results {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
 		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
 		logger.Println("[test] result:", result.Value, "outputPeriodAvg:", outputPeriodAvg)
+		resultsCount++
 	}
 
 	p1WorkersAvg, p1WorkersStd := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
@@ -299,6 +314,12 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	if p3WorkersStd/p3WorkersAvg > 0.05 && p3WorkersStd > 1 {
 		t.Error("p3WorkersStd too high")
 	}
+
+	workersNumError := math.Sqrt(math.Pow(p1WorkersAvg-0.3333*p3WorkersAvg, 2) + math.Pow(p2WorkersAvg-0.6666*p3WorkersAvg, 2) + math.Pow(p3WorkersAvg-p3WorkersExpected, 2)) / p3WorkersExpected
+	wordersNumRSD := p1WorkersStd/p1WorkersAvg + p2WorkersStd/p2WorkersAvg + p3WorkersStd/p3WorkersAvg
+	t.Logf("workersNumError: %v", workersNumError)
+	t.Logf("wordersNumRSD: %v", wordersNumRSD)
+	return resultsCount, workersNumError, wordersNumRSD
 }
 
 // calculates the average and standard deviation of concurrency in the specified time period
