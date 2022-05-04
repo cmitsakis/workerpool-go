@@ -305,10 +305,10 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 		p3WorkersExpected = float64(numOfWorkers)
 	}
 	if p3WorkersAVG < 0.9*p3WorkersExpected-1 {
-		t.Errorf("p3WorkersAVG < 0.9*%v-1 = %v", p3WorkersExpected, 0.9*p3WorkersExpected-1)
+		t.Errorf("p3WorkersAVG < %v", 0.9*p3WorkersExpected-1)
 	}
 	if p3WorkersAVG > 1.1*p3WorkersExpected+1 {
-		t.Errorf("p3WorkersAVG > 1.1*%v + 1 = %v", p3WorkersExpected, 1.1*p3WorkersExpected+1)
+		t.Errorf("p3WorkersAVG > %v", 1.1*p3WorkersExpected+1)
 	}
 
 	// fail if standard deviation is too high
