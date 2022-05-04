@@ -99,14 +99,14 @@ func TestPool(t *testing.T) {
 		close(results)
 	}()
 	const a = 0.1
-	var outputPeriodAvg time.Duration
+	var outputPeriodAVG time.Duration
 	lastReceived := time.Now()
 	var resultsCount int
 	for range results {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
-		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
-		logger.Println("[test] outputPeriodAvg:", outputPeriodAvg)
+		outputPeriodAVG = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAVG))
+		logger.Println("[test] outputPeriodAVG:", outputPeriodAVG)
 		resultsCount++
 	}
 	t.Logf("got %d results\n", resultsCount)
@@ -114,21 +114,21 @@ func TestPool(t *testing.T) {
 		t.Error("submittedCount != resultsCount")
 	}
 
-	pWorkersAvg, pWorkersStd := processStats(pStats, started.Add(30*time.Second), stopped)
-	t.Logf("pool workers: avg=%v std=%v\n", pWorkersAvg, pWorkersStd)
+	pWorkersAVG, pWorkersSD := processStats(pStats, started.Add(30*time.Second), stopped)
+	t.Logf("pool workers: AVG=%v SD=%v\n", pWorkersAVG, pWorkersSD)
 	// expectedNumOfWorkers = effectiveJobDur/inputPeriod
 	// where effectiveJobDur = jobDur / successRate
 	// because each job is tried 1/successRate on average
 	expectedNumOfWorkers := float64(jobDur/inputPeriod) / successRate
-	if pWorkersAvg < 0.95*expectedNumOfWorkers {
-		t.Errorf("pWorkersAvg < 0.95*%v", expectedNumOfWorkers)
+	if pWorkersAVG < 0.95*expectedNumOfWorkers {
+		t.Errorf("pWorkersAVG < 0.95*%v", expectedNumOfWorkers)
 	}
-	if pWorkersAvg > 1.1*expectedNumOfWorkers {
-		t.Errorf("pWorkersAvg > 1.1*%v", expectedNumOfWorkers)
+	if pWorkersAVG > 1.1*expectedNumOfWorkers {
+		t.Errorf("pWorkersAVG > 1.1*%v", expectedNumOfWorkers)
 	}
 	// fail if standard deviation is too high
-	if pWorkersStd/pWorkersAvg > 0.1 {
-		t.Error("pWorkersStd/pWorkersAvg > 0.1")
+	if pWorkersSD/pWorkersAVG > 0.1 {
+		t.Error("pWorkersSD/pWorkersAVG > 0.1")
 	}
 }
 
@@ -159,12 +159,12 @@ func TestPipeline(t *testing.T) {
 			})
 		}
 	}
-	resultsCountAvg := resultsCountSum / (len(numOfWorkersSlice) * len(inputPeriodSlice))
-	workersNumErrorAvg := workersNumErrorSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
-	wordersNumRSDAvg := wordersNumRSDSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
-	t.Logf("resultsCount average: %v", resultsCountAvg)
-	t.Logf("workersNumError average: %v", workersNumErrorAvg)
-	t.Logf("wordersNumRSD average: %v", wordersNumRSDAvg)
+	resultsCountAVG := resultsCountSum / (len(numOfWorkersSlice) * len(inputPeriodSlice))
+	workersNumErrorAVG := workersNumErrorSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
+	wordersNumRSDAVG := wordersNumRSDSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
+	t.Logf("resultsCount average: %v", resultsCountAVG)
+	t.Logf("workersNumError average: %v", workersNumErrorAVG)
+	t.Logf("wordersNumRSD average: %v", wordersNumRSDAVG)
 }
 
 func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64) {
@@ -224,7 +224,7 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	ConnectPools(p2, p3, nil)
 
 	const a = 0.1
-	var inputPeriodAvg time.Duration
+	var inputPeriodAVG time.Duration
 	lastSubmitted := time.Now()
 	started := time.Now()
 	go func() {
@@ -244,50 +244,50 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 					break
 				}
 			}
-			logger.Printf("[test] submitting job%d - inputPeriodAvg: %v\n", i, inputPeriodAvg)
+			logger.Printf("[test] submitting job%d - inputPeriodAVG: %v\n", i, inputPeriodAVG)
 			p1.Submit(float64(i))
 			inputPeriodNow := time.Since(lastSubmitted)
 			lastSubmitted = time.Now()
-			inputPeriodAvg = time.Duration(a*float64(inputPeriodNow) + (1-a)*float64(inputPeriodAvg))
+			inputPeriodAVG = time.Duration(a*float64(inputPeriodNow) + (1-a)*float64(inputPeriodAVG))
 		}
 		logger.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
 		t.Logf("submitted %d jobs\n", i)
 		p1.StopAndWait()
 	}()
 
-	var outputPeriodAvg time.Duration
+	var outputPeriodAVG time.Duration
 	lastReceived := time.Now()
 	var resultsCount int
 	for result := range p3.Results {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
-		outputPeriodAvg = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAvg))
-		logger.Println("[test] result:", result.Value, "outputPeriodAvg:", outputPeriodAvg)
+		outputPeriodAVG = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAVG))
+		logger.Println("[test] result:", result.Value, "outputPeriodAVG:", outputPeriodAVG)
 		resultsCount++
 	}
 
-	p1WorkersAvg, p1WorkersStd := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
-	p2WorkersAvg, p2WorkersStd := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
-	p3WorkersAvg, p3WorkersStd := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
-	t.Logf("[pool=p1] workers: avg=%v std=%v\n", p1WorkersAvg, p1WorkersStd)
-	t.Logf("[pool=p2] workers: avg=%v std=%v\n", p2WorkersAvg, p2WorkersStd)
-	t.Logf("[pool=p3] workers: avg=%v std=%v\n", p3WorkersAvg, p3WorkersStd)
+	p1WorkersAVG, p1WorkersSD := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
+	p2WorkersAVG, p2WorkersSD := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
+	p3WorkersAVG, p3WorkersSD := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
+	t.Logf("[pool=p1] workers: AVG=%v SD=%v\n", p1WorkersAVG, p1WorkersSD)
+	t.Logf("[pool=p2] workers: AVG=%v SD=%v\n", p2WorkersAVG, p2WorkersSD)
+	t.Logf("[pool=p3] workers: AVG=%v SD=%v\n", p3WorkersAVG, p3WorkersSD)
 
-	// p1WorkersAvg should be about 1/3 of p3WorkersAvg
-	if p1WorkersAvg < 0.3*p3WorkersAvg-1 {
-		t.Errorf("p1WorkersAvg < %v", 0.3*p3WorkersAvg-1)
+	// p1WorkersAVG should be about 1/3 of p3WorkersAVG
+	if p1WorkersAVG < 0.3*p3WorkersAVG-1 {
+		t.Errorf("p1WorkersAVG < %v", 0.3*p3WorkersAVG-1)
 	}
-	if p1WorkersAvg > 0.4*p3WorkersAvg+1 {
-		t.Errorf("p1WorkersAvg > %v", 0.4*p3WorkersAvg+1)
+	if p1WorkersAVG > 0.4*p3WorkersAVG+1 {
+		t.Errorf("p1WorkersAVG > %v", 0.4*p3WorkersAVG+1)
 	}
-	// p2WorkersAvg should be about 2/3 of p3WorkersAvg
-	if p2WorkersAvg < 0.6*p3WorkersAvg-1 {
-		t.Errorf("p2WorkersAvg < %v", 0.6*p3WorkersAvg-1)
+	// p2WorkersAVG should be about 2/3 of p3WorkersAVG
+	if p2WorkersAVG < 0.6*p3WorkersAVG-1 {
+		t.Errorf("p2WorkersAVG < %v", 0.6*p3WorkersAVG-1)
 	}
-	if p2WorkersAvg > 0.7*p3WorkersAvg+1 {
-		t.Errorf("p2WorkersAvg > %v", 0.7*p3WorkersAvg+1)
+	if p2WorkersAVG > 0.7*p3WorkersAVG+1 {
+		t.Errorf("p2WorkersAVG > %v", 0.7*p3WorkersAVG+1)
 	}
-	// p3WorkersAvg should be about p3WorkersExpected
+	// p3WorkersAVG should be about p3WorkersExpected
 	var p3WorkersExpected float64
 	if inputPeriod > 0 {
 		p3WorkersExpected = float64(jobDur3 / inputPeriod)
@@ -297,26 +297,26 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	} else {
 		p3WorkersExpected = float64(numOfWorkers)
 	}
-	if p3WorkersAvg < 0.9*p3WorkersExpected-1 {
-		t.Errorf("p3WorkersAvg < 0.9*%v-1 = %v", p3WorkersExpected, 0.9*p3WorkersExpected-1)
+	if p3WorkersAVG < 0.9*p3WorkersExpected-1 {
+		t.Errorf("p3WorkersAVG < 0.9*%v-1 = %v", p3WorkersExpected, 0.9*p3WorkersExpected-1)
 	}
-	if p3WorkersAvg > 1.1*p3WorkersExpected+1 {
-		t.Errorf("p3WorkersAvg > 1.1*%v + 1 = %v", p3WorkersExpected, 1.1*p3WorkersExpected+1)
+	if p3WorkersAVG > 1.1*p3WorkersExpected+1 {
+		t.Errorf("p3WorkersAVG > 1.1*%v + 1 = %v", p3WorkersExpected, 1.1*p3WorkersExpected+1)
 	}
 
 	// fail if standard deviation is too high
-	if p1WorkersStd/p1WorkersAvg > 0.1 && p1WorkersStd > 1 {
-		t.Error("p1WorkersStd too high")
+	if p1WorkersSD/p1WorkersAVG > 0.1 && p1WorkersSD > 1 {
+		t.Error("p1WorkersSD too high")
 	}
-	if p2WorkersStd/p2WorkersAvg > 0.1 && p2WorkersStd > 1 {
-		t.Error("p2WorkersStd too high")
+	if p2WorkersSD/p2WorkersAVG > 0.1 && p2WorkersSD > 1 {
+		t.Error("p2WorkersSD too high")
 	}
-	if p3WorkersStd/p3WorkersAvg > 0.05 && p3WorkersStd > 1 {
-		t.Error("p3WorkersStd too high")
+	if p3WorkersSD/p3WorkersAVG > 0.05 && p3WorkersSD > 1 {
+		t.Error("p3WorkersSD too high")
 	}
 
-	workersNumError := math.Sqrt(math.Pow(p1WorkersAvg-0.3333*p3WorkersAvg, 2) + math.Pow(p2WorkersAvg-0.6666*p3WorkersAvg, 2) + math.Pow(p3WorkersAvg-p3WorkersExpected, 2)) / p3WorkersExpected
-	wordersNumRSD := p1WorkersStd/p1WorkersAvg + p2WorkersStd/p2WorkersAvg + p3WorkersStd/p3WorkersAvg
+	workersNumError := math.Sqrt(math.Pow(p1WorkersAVG-0.3333*p3WorkersAVG, 2) + math.Pow(p2WorkersAVG-0.6666*p3WorkersAVG, 2) + math.Pow(p3WorkersAVG-p3WorkersExpected, 2)) / p3WorkersExpected
+	wordersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
 	t.Logf("workersNumError: %v", workersNumError)
 	t.Logf("wordersNumRSD: %v", wordersNumRSD)
 	return resultsCount, workersNumError, wordersNumRSD
@@ -338,9 +338,9 @@ func processStats(statsArray []stats, from time.Time, to time.Time) (float64, fl
 		workersSumSq += int(s.Concurrency * s.Concurrency)
 	}
 	nFloat := float64(n)
-	workersAvg := float64(workersSum) / nFloat
-	workersStd := math.Sqrt(float64(workersSumSq)/nFloat - math.Pow(float64(workersSum)/nFloat, 2))
-	return workersAvg, workersStd
+	workersAVG := float64(workersSum) / nFloat
+	workersSD := math.Sqrt(float64(workersSumSq)/nFloat - math.Pow(float64(workersSum)/nFloat, 2))
+	return workersAVG, workersSD
 }
 
 func loggerIfDebugEnabled() *log.Logger {
