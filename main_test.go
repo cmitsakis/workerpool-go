@@ -227,6 +227,7 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	var inputPeriodAVG time.Duration
 	lastSubmitted := time.Now()
 	started := time.Now()
+	var submittedCount int
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
@@ -252,6 +253,7 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 		}
 		logger.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
 		t.Logf("submitted %d jobs\n", i)
+		submittedCount = i
 		p1.StopAndWait()
 	}()
 
@@ -264,6 +266,9 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 		outputPeriodAVG = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAVG))
 		logger.Println("[test] result:", result.Value, "outputPeriodAVG:", outputPeriodAVG)
 		resultsCount++
+	}
+	if submittedCount != resultsCount {
+		t.Error("submittedCount != resultsCount")
 	}
 
 	p1WorkersAVG, p1WorkersSD := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
