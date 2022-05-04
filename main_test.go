@@ -279,18 +279,18 @@ func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration)
 	t.Logf("[pool=p3] workers: AVG=%v SD=%v\n", p3WorkersAVG, p3WorkersSD)
 
 	// p1WorkersAVG should be about 1/3 of p3WorkersAVG
-	if p1WorkersAVG < 0.3*p3WorkersAVG-1 {
-		t.Errorf("p1WorkersAVG < %v", 0.3*p3WorkersAVG-1)
+	if p1WorkersAVG < 0.8*0.3333*p3WorkersAVG-1 {
+		t.Errorf("p1WorkersAVG < %v", 0.8*0.3333*p3WorkersAVG-1)
 	}
-	if p1WorkersAVG > 0.4*p3WorkersAVG+1 {
-		t.Errorf("p1WorkersAVG > %v", 0.4*p3WorkersAVG+1)
+	if p1WorkersAVG > 1.2*0.3333*p3WorkersAVG+1 {
+		t.Errorf("p1WorkersAVG > %v", 1.2*0.3333*p3WorkersAVG+1)
 	}
 	// p2WorkersAVG should be about 2/3 of p3WorkersAVG
-	if p2WorkersAVG < 0.6*p3WorkersAVG-1 {
-		t.Errorf("p2WorkersAVG < %v", 0.6*p3WorkersAVG-1)
+	if p2WorkersAVG < 0.8*0.6666*p3WorkersAVG-1 {
+		t.Errorf("p2WorkersAVG < %v", 0.8*0.6666*p3WorkersAVG-1)
 	}
-	if p2WorkersAVG > 0.7*p3WorkersAVG+1 {
-		t.Errorf("p2WorkersAVG > %v", 0.7*p3WorkersAVG+1)
+	if p2WorkersAVG > 1.2*0.6666*p3WorkersAVG+1 {
+		t.Errorf("p2WorkersAVG > %v", 1.2*0.6666*p3WorkersAVG+1)
 	}
 	// p3WorkersAVG should be about p3WorkersExpected
 	var p3WorkersExpected float64
