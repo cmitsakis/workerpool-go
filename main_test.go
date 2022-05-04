@@ -137,7 +137,7 @@ func TestPipeline(t *testing.T) {
 	if testing.Short() == true {
 		numOfWorkersSlice = []int{10, 100}
 	} else {
-		numOfWorkersSlice = []int{5, 10, 20, 30, 50, 75, 100, 150, 200, 500}
+		numOfWorkersSlice = []int{5, 10, 20, 50, 100, 200, 500}
 	}
 	var inputPeriodSlice []time.Duration
 	if testing.Short() == true {
