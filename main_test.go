@@ -204,9 +204,10 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 			})
 		}
 	}
-	resultsCountAVG := resultsCountSum / (len(numOfWorkersSlice) * len(inputPeriodSlice))
-	workersNumErrorAVG := workersNumErrorSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
-	workersNumRSDAVG := workersNumRSDSum / float64(len(numOfWorkersSlice) * len(inputPeriodSlice))
+	numOfTests := len(numOfWorkersSlice) * len(inputPeriodSlice)
+	resultsCountAVG := resultsCountSum / numOfTests
+	workersNumErrorAVG := workersNumErrorSum / float64(numOfTests)
+	workersNumRSDAVG := workersNumRSDSum / float64(numOfTests)
 	t.Logf("resultsCount average: %v", resultsCountAVG)
 	t.Logf("workersNumError average: %v", workersNumErrorAVG)
 	t.Logf("workersNumRSD average: %v", workersNumRSDAVG)
