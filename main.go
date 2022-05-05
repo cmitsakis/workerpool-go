@@ -256,8 +256,8 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 		workerDeinit:     workerDeinit,
 		cancelWorkers:    cancelWorkers,
 	}
-	if p.maxActiveWorkers == 0 {
-		return nil, fmt.Errorf("maxActiveWorkers = 0")
+	if p.maxActiveWorkers <= 0 {
+		return nil, fmt.Errorf("maxActiveWorkers <= 0")
 	}
 	p.jobsNew = make(chan I, 2)
 	p.jobsQueue = make(chan Job[I], p.maxActiveWorkers) // size p.maxActiveWorkers in order to avoid deadlock
