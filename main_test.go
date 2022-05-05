@@ -29,6 +29,47 @@ func TestExample(t *testing.T) {
 	p.StopAndWait()
 }
 
+func TestPoolCorrectness(t *testing.T) {
+	p, err := NewPoolWithResults(5, func(job Job[float64], workerID int) (float64, error) {
+		// fail the first attempt only
+		if job.Attempt == 0 {
+			return 0, ErrorWrapRetryable(fmt.Errorf("failed"))
+		}
+		return math.Sqrt(job.Payload), nil
+	}, Retries(1), Name("p"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
+	if err != nil {
+		t.Errorf("failed to create pool p: %s", err)
+		return
+	}
+
+	const submittedCount = 100
+	go func() {
+		for i := 0; i < submittedCount; i++ {
+			p.Submit(float64(i))
+		}
+		p.StopAndWait()
+	}()
+
+	var resultsCount int
+	seenPayloads := make(map[float64]struct{}, submittedCount)
+	for result := range p.Results {
+		if result.Error != nil {
+			t.Errorf("result contains error: %v", result.Error)
+		}
+		resultsCount++
+		if result.Value != math.Sqrt(result.Job.Payload) {
+			t.Errorf("wrong result: job.Payload=%v result.Value=%v", result.Job.Payload, result.Value)
+		}
+		if _, exists := seenPayloads[result.Job.Payload]; exists {
+			t.Errorf("duplicate job.Payload=%v", result.Job.Payload)
+		}
+		seenPayloads[result.Job.Payload] = struct{}{}
+	}
+	if resultsCount != submittedCount {
+		t.Error("submittedCount != resultsCount")
+	}
+}
+
 func TestPool(t *testing.T) {
 	var logger *log.Logger
 	if *flagDebugLogs {
