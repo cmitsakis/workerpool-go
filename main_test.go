@@ -70,7 +70,8 @@ func TestPoolCorrectness(t *testing.T) {
 	}
 }
 
-func TestPool(t *testing.T) {
+// Failure does not mean there is an error, but that the auto-scaling behavior of the pool is not ideal and can be improved.
+func TestPoolAutoscalingBehavior(t *testing.T) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.Default()
@@ -173,7 +174,10 @@ func TestPool(t *testing.T) {
 	}
 }
 
-func TestPipeline(t *testing.T) {
+// Failure does not mean there is an error, but that the auto-scaling behavior of the pools is not ideal and can be improved.
+// Use: 'go test -timeout 30m -v' to make sure all tests run, and be able to read all the stats.
+// Alternatively use: 'go test -short -v' to run a small number of test cases.
+func TestPipelineAutoscalingBehavior(t *testing.T) {
 	var numOfWorkersSlice []int
 	if testing.Short() == true {
 		numOfWorkersSlice = []int{10, 100}
@@ -193,7 +197,7 @@ func TestPipeline(t *testing.T) {
 	for _, w := range numOfWorkersSlice {
 		for _, p := range inputPeriodSlice {
 			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
-				resultsCount, workersNumError, workersNumRSD := testPipelineCase(t, w, p)
+				resultsCount, workersNumError, workersNumRSD := testPipelineAutoscalingBehaviorCase(t, w, p)
 				resultsCountSum += resultsCount
 				workersNumErrorSum += workersNumError
 				workersNumRSDSum += workersNumRSD
@@ -208,7 +212,7 @@ func TestPipeline(t *testing.T) {
 	t.Logf("workersNumRSD average: %v", workersNumRSDAVG)
 }
 
-func testPipelineCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64) {
+func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.Default()
