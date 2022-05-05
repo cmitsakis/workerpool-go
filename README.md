@@ -37,6 +37,49 @@ go get go.mitsakis.org/workerpool
 
 ## Usage
 
+Type `Pool[I, O, C any]` uses three type parameters:
+
+- `I`: input (job payload) type
+- `O`: output (result) type
+- `C`: type returned by the `workerInit()` function (e.g. a connection)
+
+You might not need all three type parameter so for convenience you can create a pool by using a constructor that hides some type parameters.
+That's why there are four constructors of increasing complexity:
+
+```go
+NewPoolSimple(
+	maxActiveWorkers int,
+	handler func(job Job[I], workerID int) error,
+	...)
+
+NewPoolWithInit(
+	maxActiveWorkers int,
+	handler func(job Job[I], workerID int, connection C) error,
+	workerInit func(workerID int) (C, error),
+	workerDeinit func(workerID int, connection C) error,
+	...)
+
+NewPoolWithResults(
+	maxActiveWorkers int,
+	handler func(job Job[I], workerID int) (O, error),
+	...)
+
+NewPoolWithResultsAndInit(
+	maxActiveWorkers int,
+	handler func(job Job[I], workerID int, connection C) (O, error),
+	workerInit func(workerID int) (C, error),
+	workerDeinit func(workerID int, connection C) error,
+	...)
+```
+
+You can also connect pools of compatible type (results of `p1` are the type as inputs to `p2`) into a pipeline by using the `ConnectPools(p1, p2, handleError)` function like this:
+```go
+workerpool.ConnectPools(p1, p2, func(result workerpool.Result[string, []byte]) {
+	// log error
+})
+```
+By connecting two pools, results of `p1` that have no error are submitted to `p2`, and those with an error are handled by the `handleError()` function.
+
 ### Simple example
 ```go
 package main
@@ -188,7 +231,7 @@ func main() {
 
 ## Contributing
 
-Bug reports, bug fixes, and ideas to improve the API, are welcome.
+Bug reports, bug fixes, and ideas to improve the API or the auto-scaling behavior, are welcome.
 
 ## License
 
