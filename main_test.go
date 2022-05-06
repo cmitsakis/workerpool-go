@@ -156,7 +156,7 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 		t.Error("submittedCount != resultsCount")
 	}
 
-	pWorkersAVG, pWorkersSD := processStats(pStats, started.Add(30*time.Second), stopped)
+	pWorkersAVG, pWorkersSD, throughput := processStats(pStats, started.Add(30*time.Second), stopped)
 	t.Logf("pool workers: AVG=%v SD=%v\n", pWorkersAVG, pWorkersSD)
 	// expectedNumOfWorkers = effectiveJobDur/inputPeriod
 	// where effectiveJobDur = jobDur / successRate
@@ -171,6 +171,28 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 	// fail if standard deviation is too high
 	if pWorkersSD/pWorkersAVG > 0.1 {
 		t.Error("pWorkersSD/pWorkersAVG > 0.1")
+	}
+
+	t.Logf("throughput: %v\n", throughput)
+	// expectedThroughput calculation assumes the inputPeriod is long enough that there is no backpressure
+	inputPeriodInSeconds := float64(inputPeriod) / float64(time.Second)
+	expectedThroughput := 1 / inputPeriodInSeconds
+	if throughput < 0.85*expectedThroughput {
+		t.Errorf("throughput < %v", 0.85*expectedThroughput)
+	}
+	if throughput > 1.1*expectedThroughput {
+		t.Errorf("throughput > %v", 1.1*expectedThroughput)
+	}
+
+	throughputPerWorker := throughput / pWorkersAVG
+	t.Logf("throughputPerWorker: %v\n", throughputPerWorker)
+	// expectedThroughputPerWorker calculation assumes the inputPeriod is long enough that there is no backpressure
+	expectedThroughputPerWorker := expectedThroughput / expectedNumOfWorkers
+	if throughputPerWorker < 0.85*expectedThroughputPerWorker {
+		t.Errorf("throughputPerWorker < %v", 0.85*expectedThroughputPerWorker)
+	}
+	if throughputPerWorker > 1.1*expectedThroughputPerWorker {
+		t.Errorf("throughputPerWorker > %v", 1.1*expectedThroughputPerWorker)
 	}
 }
 
@@ -262,13 +284,22 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 	var resultsCountSum int
 	var workersNumErrorSum float64
 	var workersNumRSDSum float64
+	var throughputPerActivationFractionSum float64
 	for _, w := range numOfWorkersSlice {
 		for _, p := range inputPeriodSlice {
 			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
-				resultsCount, workersNumError, workersNumRSD := testPipelineAutoscalingBehaviorCase(t, w, p)
+				resultsCount, workersNumError, workersNumRSD, throughput, activationFraction := testPipelineAutoscalingBehaviorCase(t, w, p)
 				resultsCountSum += resultsCount
 				workersNumErrorSum += workersNumError
 				workersNumRSDSum += workersNumRSD
+				// throughputPerActivationFraction:
+				// throughput divided by activationFraction (fraction of workers that are activated)
+				// in order to normalize the values of all tests and make them comparable.
+				// if job duration was constant, we would divide by number of active workers,
+				// but since we define job duration to be proportional to the number of workers,
+				// we have to divide by (number of active workers) / (number of workers) = activationFraction
+				throughputPerActivationFraction := float64(throughput) / activationFraction
+				throughputPerActivationFractionSum += throughputPerActivationFraction
 			})
 		}
 	}
@@ -276,12 +307,14 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 	resultsCountAVG := resultsCountSum / numOfTests
 	workersNumErrorAVG := workersNumErrorSum / float64(numOfTests)
 	workersNumRSDAVG := workersNumRSDSum / float64(numOfTests)
+	throughputPerActivationFractionAVG := throughputPerActivationFractionSum / float64(numOfTests)
 	t.Logf("resultsCount average: %v", resultsCountAVG)
 	t.Logf("workersNumError average: %v", workersNumErrorAVG)
 	t.Logf("workersNumRSD average: %v", workersNumRSDAVG)
+	t.Logf("throughputPerActivationFraction average: %v", throughputPerActivationFractionAVG)
 }
 
-func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64) {
+func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64, float64, float64) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.Default()
@@ -306,7 +339,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 	}))
 	if err != nil {
 		t.Errorf("failed to create pool p1: %s", err)
-		return 0, math.NaN(), math.NaN()
+		return 0, math.NaN(), math.NaN(), math.NaN(), math.NaN()
 	}
 
 	// stage 2: negate number
@@ -318,7 +351,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 	}))
 	if err != nil {
 		t.Errorf("failed to create pool p2: %s", err)
-		return 0, math.NaN(), math.NaN()
+		return 0, math.NaN(), math.NaN(), math.NaN(), math.NaN()
 	}
 
 	// stage 3: convert float to string
@@ -330,7 +363,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 	}))
 	if err != nil {
 		t.Errorf("failed to create pool p3: %s", err)
-		return 0, math.NaN(), math.NaN()
+		return 0, math.NaN(), math.NaN(), math.NaN(), math.NaN()
 	}
 
 	// connect p1, p2, p3 into a pipeline
@@ -385,9 +418,9 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		t.Error("submittedCount != resultsCount")
 	}
 
-	p1WorkersAVG, p1WorkersSD := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
-	p2WorkersAVG, p2WorkersSD := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
-	p3WorkersAVG, p3WorkersSD := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
+	p1WorkersAVG, p1WorkersSD, _ := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
+	p2WorkersAVG, p2WorkersSD, _ := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
+	p3WorkersAVG, p3WorkersSD, throughput := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
 	t.Logf("[pool=p1] workers: AVG=%v SD=%v\n", p1WorkersAVG, p1WorkersSD)
 	t.Logf("[pool=p2] workers: AVG=%v SD=%v\n", p2WorkersAVG, p2WorkersSD)
 	t.Logf("[pool=p3] workers: AVG=%v SD=%v\n", p3WorkersAVG, p3WorkersSD)
@@ -438,16 +471,34 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 
 	workersNumError := math.Sqrt(math.Pow(p1WorkersAVG-p1WorkersExpected, 2)+math.Pow(p2WorkersAVG-p2WorkersExpected, 2)+math.Pow(p3WorkersAVG-p3WorkersExpected, 2)) / p3WorkersExpected
 	workersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
+	activationFraction := (p1WorkersAVG + p2WorkersAVG + p3WorkersAVG) / float64(3*numOfWorkers)
 	t.Logf("workersNumError: %v", workersNumError)
 	t.Logf("workersNumRSD: %v", workersNumRSD)
-	return resultsCount, workersNumError, workersNumRSD
+	t.Logf("throughput: %v", throughput)
+	t.Logf("activationFraction: %v", activationFraction)
+	t.Logf("throughputPerActivationFraction: %v", float64(throughput)/activationFraction)
+	return resultsCount, workersNumError, workersNumRSD, throughput, activationFraction
 }
 
 // calculates the average and standard deviation of concurrency in the specified time period
-func processStats(statsArray []stats, from time.Time, to time.Time) (float64, float64) {
+func processStats(statsArray []stats, from time.Time, to time.Time) (float64, float64, float64) {
 	var workersSum int
 	var workersSumSq int
+
+	// number of elements of statsArray within the specified time period
 	var n int
+
+	// time at the first element of statsArray within the specified time period
+	var t0 time.Time
+	// time at the last element of statsArray within the specified time period
+	var t1 time.Time
+
+	// doneCounter at the first element of statsArray within the specified time period
+	var doneCounter0 int
+	// doneCounter at the last element of statsArray within the specified time period
+	var doneCounter1 int
+
+	first := true
 	for _, s := range statsArray {
 		if s.Time.Before(from) {
 			continue
@@ -455,13 +506,23 @@ func processStats(statsArray []stats, from time.Time, to time.Time) (float64, fl
 			break
 		}
 		n++
+		if first {
+			first = false
+			t0 = s.Time
+			doneCounter0 = s.DoneCounter
+		}
+		t1 = s.Time
+		doneCounter1 = s.DoneCounter
 		workersSum += int(s.Concurrency)
 		workersSumSq += int(s.Concurrency * s.Concurrency)
 	}
 	nFloat := float64(n)
 	workersAVG := float64(workersSum) / nFloat
 	workersSD := math.Sqrt(float64(workersSumSq)/nFloat - math.Pow(float64(workersSum)/nFloat, 2))
-	return workersAVG, workersSD
+	numOfJobsDone := doneCounter1 - doneCounter0
+	dtInSeconds := float64(t1.Sub(t0)) / float64(time.Second)
+	throughput := float64(numOfJobsDone) / dtInSeconds
+	return workersAVG, workersSD, throughput
 }
 
 func loggerIfDebugEnabled() *log.Logger {
