@@ -174,6 +174,74 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 	}
 }
 
+type pair[V, P any] struct {
+	Value           V
+	OriginalPayload P
+}
+
+func TestPipelineCorrectness(t *testing.T) {
+	// stage 1: calculate square root
+	p1, err := NewPoolWithResults(5, func(job Job[int], workerID int) (pair[float64, int], error) {
+		// fail the first attempt only
+		if job.Attempt == 0 {
+			return pair[float64, int]{0, 0}, ErrorWrapRetryable(fmt.Errorf("failed"))
+		}
+		return pair[float64, int]{Value: math.Sqrt(float64(job.Payload)), OriginalPayload: job.Payload}, nil
+	}, Retries(1), Name("p1"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
+	if err != nil {
+		t.Errorf("failed to create pool p1: %s", err)
+		return
+	}
+
+	// stage 2: negate number
+	p2, err := NewPoolWithResults(5, func(job Job[pair[float64, int]], workerID int) (pair[float64, int], error) {
+		return pair[float64, int]{Value: -job.Payload.Value, OriginalPayload: job.Payload.OriginalPayload}, nil
+	}, Name("p2"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
+	if err != nil {
+		t.Errorf("failed to create pool p2: %s", err)
+		return
+	}
+
+	// stage 3: convert float to string
+	p3, err := NewPoolWithResults(5, func(job Job[pair[float64, int]], workerID int) (string, error) {
+		return fmt.Sprintf("%.3f", job.Payload.Value), nil
+	}, Name("p3"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
+	if err != nil {
+		t.Errorf("failed to create pool p3: %s", err)
+		return
+	}
+
+	ConnectPools(p1, p2, nil)
+	ConnectPools(p2, p3, nil)
+
+	const submittedCount = 100
+	go func() {
+		for i := 0; i < submittedCount; i++ {
+			p1.Submit(i)
+		}
+		p1.StopAndWait()
+	}()
+
+	var resultsCount int
+	seenPayloads := make(map[int]struct{}, submittedCount)
+	for result := range p3.Results {
+		if result.Error != nil {
+			t.Errorf("result contains error: %v", result.Error)
+		}
+		resultsCount++
+		if result.Value != fmt.Sprintf("%.3f", -math.Sqrt(float64(result.Job.Payload.OriginalPayload))) {
+			t.Errorf("wrong result: OriginalPayload=%v result.Value=%v", result.Job.Payload.OriginalPayload, result.Value)
+		}
+		if _, exists := seenPayloads[result.Job.Payload.OriginalPayload]; exists {
+			t.Errorf("duplicate job.Payload=%v", result.Job.Payload.OriginalPayload)
+		}
+		seenPayloads[result.Job.Payload.OriginalPayload] = struct{}{}
+	}
+	if resultsCount != submittedCount {
+		t.Error("submittedCount != resultsCount")
+	}
+}
+
 // Failure does not mean there is an error, but that the auto-scaling behavior of the pools is not ideal and can be improved.
 // Use: 'go test -timeout 30m -v' to make sure all tests run, and be able to read all the stats.
 // Alternatively use: 'go test -short -v' to run a small number of test cases.
