@@ -72,7 +72,7 @@ NewPoolWithResultsAndInit(
 	...)
 ```
 
-You can also connect pools of compatible type (results of `p1` are the type as inputs to `p2`) into a pipeline by using the `ConnectPools(p1, p2, handleError)` function like this:
+You can also connect pools of compatible type (results of `p1` are the same type as inputs to `p2`) into a pipeline by using the `ConnectPools(p1, p2, handleError)` function like this:
 ```go
 workerpool.ConnectPools(p1, p2, func(result workerpool.Result[string, []byte]) {
 	// log error
