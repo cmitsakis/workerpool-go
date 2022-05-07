@@ -231,7 +231,15 @@ func main() {
 
 ## Contributing
 
-Bug reports, bug fixes, and ideas to improve the API or the auto-scaling behavior, are welcome.
+### non-code contributions
+
+Bug reports, and ideas to improve the API or the auto-scaling behavior, are welcome.
+
+### code contributions
+
+Bug fixes, and improvements to auto-scaling (implementation or tests), are welcome.
+
+Correctness tests (`go test -run Correctness`) must pass, and auto-scaling behavior tests (`go test -run Autoscaling -v -timeout 30m`) should not become worse.
 
 ## License
 
