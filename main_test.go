@@ -4,6 +4,7 @@
 package workerpool
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -12,11 +13,15 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
-var flagDebugLogs = flag.Bool("debug", false, "Enable debug logs")
+var (
+	flagDebugLogs           = flag.Bool("debug", false, "Enable debug logs")
+	flagSaveTimeseriesToDir = flag.String("save-timeseries-dir", "", "Save concurrency timeseries data to files in the given directory")
+)
 
 func TestExample(t *testing.T) {
 	p, _ := NewPoolSimple(4, func(job Job[float64], workerID int) error {
@@ -155,6 +160,13 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 	t.Logf("[INFO] got %d results\n", resultsCount)
 	if submittedCount != resultsCount {
 		t.Error("[ERROR] submittedCount != resultsCount")
+	}
+
+	if *flagSaveTimeseriesToDir != "" {
+		err := saveConcurrencyStatsToFile(pStats, *flagSaveTimeseriesToDir+"/"+t.Name()+".txt")
+		if err != nil {
+			t.Logf("saveConcurrencyStatsToFile failed: %v", err)
+		}
 	}
 
 	pWorkersAVG, pWorkersSD, throughput := processStats(pStats, started.Add(30*time.Second), stopped)
@@ -419,6 +431,28 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		t.Error("[ERROR] submittedCount != resultsCount")
 	}
 
+	if *flagSaveTimeseriesToDir != "" {
+		repFunc := func(r rune) rune {
+			if r == '/' || r == '=' {
+				return '_'
+			}
+			return r
+		}
+		tNameSafe := strings.Map(repFunc, t.Name())
+		err := saveConcurrencyStatsToFile(p1Stats, *flagSaveTimeseriesToDir+"/"+tNameSafe+"_p1.txt")
+		if err != nil {
+			t.Logf("saveConcurrencyStatsToFile failed: %v", err)
+		}
+		err = saveConcurrencyStatsToFile(p2Stats, *flagSaveTimeseriesToDir+"/"+tNameSafe+"_p2.txt")
+		if err != nil {
+			t.Logf("saveConcurrencyStatsToFile failed: %v", err)
+		}
+		err = saveConcurrencyStatsToFile(p3Stats, *flagSaveTimeseriesToDir+"/"+tNameSafe+"_p3.txt")
+		if err != nil {
+			t.Logf("saveConcurrencyStatsToFile failed: %v", err)
+		}
+	}
+
 	p1WorkersAVG, p1WorkersSD, _ := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
 	p2WorkersAVG, p2WorkersSD, _ := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
 	p3WorkersAVG, p3WorkersSD, throughput := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
@@ -524,6 +558,36 @@ func processStats(statsArray []stats, from time.Time, to time.Time) (float64, fl
 	dtInSeconds := float64(t1.Sub(t0)) / float64(time.Second)
 	throughput := float64(numOfJobsDone) / dtInSeconds
 	return workersAVG, workersSD, throughput
+}
+
+func saveConcurrencyStatsToFile(statsArray []stats, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("os.Create() failed: %v", err)
+	}
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+
+	var t0 time.Time
+	first := true
+	for _, s := range statsArray {
+		if first {
+			first = false
+			t0 = s.Time
+		}
+		dt := s.Time.Sub(t0)
+		_, err = w.WriteString(fmt.Sprintf("%v %v\n", dt.Microseconds(), s.Concurrency))
+		if err != nil {
+			return fmt.Errorf("w.WriteString() failed: %v", err)
+		}
+	}
+
+	err = w.Flush()
+	if err != nil {
+		return fmt.Errorf("w.Flush() failed: %v", err)
+	}
+	return nil
 }
 
 func loggerIfDebugEnabled() *log.Logger {
