@@ -11,6 +11,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 )
@@ -38,7 +39,7 @@ func TestPoolCorrectness(t *testing.T) {
 		return math.Sqrt(job.Payload), nil
 	}, Retries(1), Name("p"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
-		t.Errorf("failed to create pool p: %s", err)
+		t.Errorf("[ERROR] failed to create pool p: %s", err)
 		return
 	}
 
@@ -54,19 +55,19 @@ func TestPoolCorrectness(t *testing.T) {
 	seenPayloads := make(map[float64]struct{}, submittedCount)
 	for result := range p.Results {
 		if result.Error != nil {
-			t.Errorf("result contains error: %v", result.Error)
+			t.Errorf("[ERROR] result contains error: %v", result.Error)
 		}
 		resultsCount++
 		if result.Value != math.Sqrt(result.Job.Payload) {
-			t.Errorf("wrong result: job.Payload=%v result.Value=%v", result.Job.Payload, result.Value)
+			t.Errorf("[ERROR] wrong result: job.Payload=%v result.Value=%v", result.Job.Payload, result.Value)
 		}
 		if _, exists := seenPayloads[result.Job.Payload]; exists {
-			t.Errorf("duplicate job.Payload=%v", result.Job.Payload)
+			t.Errorf("[ERROR] duplicate job.Payload=%v", result.Job.Payload)
 		}
 		seenPayloads[result.Job.Payload] = struct{}{}
 	}
 	if resultsCount != submittedCount {
-		t.Error("submittedCount != resultsCount")
+		t.Error("[ERROR] submittedCount != resultsCount")
 	}
 }
 
@@ -74,7 +75,7 @@ func TestPoolCorrectness(t *testing.T) {
 func TestPoolAutoscalingBehavior(t *testing.T) {
 	var logger *log.Logger
 	if *flagDebugLogs {
-		logger = log.Default()
+		logger = log.New(os.Stdout, "[DEBUG] [test] ", log.LstdFlags|log.Lmsgprefix)
 	} else {
 		logger = log.New(io.Discard, "", 0)
 	}
@@ -90,7 +91,7 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 	results := make(chan struct{})
 	p, err := NewPoolWithInit(len(workerProfiles), func(job Job[int], workerID int, connection struct{}) error {
 		worker := workerProfiles[workerID]
-		logger.Printf("[test/worker%v] job%d started - attempt %d - worker %v\n", workerID, job.ID, job.Attempt, worker)
+		logger.Printf("[worker%v] job%d started - attempt %d - worker %v\n", workerID, job.ID, job.Attempt, worker)
 		time.Sleep(jobDur)
 		if rand.Float32() > successRate {
 			return ErrorWrapRetryableUnaccounted(fmt.Errorf("job failure"))
@@ -102,20 +103,20 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 		if rand.Float32() > 0.9 {
 			return struct{}{}, fmt.Errorf("worker init failure")
 		}
-		logger.Printf("[test/worker%v] connecting\n", workerID)
+		logger.Printf("[worker%v] connecting\n", workerID)
 		return struct{}{}, nil
 	}, func(workerID int, connection struct{}) error {
 		time.Sleep(3 * jobDur)
 		if rand.Float32() > 0.9 {
 			return fmt.Errorf("worker deinit failure")
 		}
-		logger.Printf("[test/worker%v] disconnecting\n", workerID)
+		logger.Printf("[worker%v] disconnecting\n", workerID)
 		return nil
 	}, LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
 		pStats = append(pStats, s)
 	}))
 	if err != nil {
-		t.Errorf("failed to create pool: %s", err)
+		t.Errorf("[ERROR] failed to create pool: %s", err)
 		return
 	}
 	started := time.Now()
@@ -129,15 +130,15 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 			if sleepCtx(ctx, inputPeriod) {
 				break
 			}
-			logger.Printf("[test] submitting job%d\n", i)
+			logger.Printf("submitting job%d\n", i)
 			p.Submit(i)
 		}
-		logger.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
-		t.Logf("submitted %d jobs\n", i)
+		logger.Printf("submitted %d jobs - calling p.StopAndWait()\n", i)
+		t.Logf("[INFO] submitted %d jobs\n", i)
 		submittedCount = i
 		stopped = time.Now()
 		p.StopAndWait()
-		logger.Println("[test] p.StopAndWait() returned")
+		logger.Println("p.StopAndWait() returned")
 		close(results)
 	}()
 	const a = 0.1
@@ -148,51 +149,51 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
 		outputPeriodAVG = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAVG))
-		logger.Println("[test] outputPeriodAVG:", outputPeriodAVG)
+		logger.Println("outputPeriodAVG:", outputPeriodAVG)
 		resultsCount++
 	}
-	t.Logf("got %d results\n", resultsCount)
+	t.Logf("[INFO] got %d results\n", resultsCount)
 	if submittedCount != resultsCount {
-		t.Error("submittedCount != resultsCount")
+		t.Error("[ERROR] submittedCount != resultsCount")
 	}
 
 	pWorkersAVG, pWorkersSD, throughput := processStats(pStats, started.Add(30*time.Second), stopped)
-	t.Logf("pool workers: AVG=%v SD=%v\n", pWorkersAVG, pWorkersSD)
+	t.Logf("[INFO] pool workers: AVG=%v SD=%v\n", pWorkersAVG, pWorkersSD)
 	// expectedNumOfWorkers = effectiveJobDur/inputPeriod
 	// where effectiveJobDur = jobDur / successRate
 	// because each job is tried 1/successRate on average
 	expectedNumOfWorkers := float64(jobDur/inputPeriod) / successRate
 	if pWorkersAVG < 0.95*expectedNumOfWorkers {
-		t.Errorf("pWorkersAVG < 0.95*%v", expectedNumOfWorkers)
+		t.Errorf("[WARNING] pWorkersAVG < 0.95*%v", expectedNumOfWorkers)
 	}
 	if pWorkersAVG > 1.1*expectedNumOfWorkers {
-		t.Errorf("pWorkersAVG > 1.1*%v", expectedNumOfWorkers)
+		t.Errorf("[WARNING] pWorkersAVG > 1.1*%v", expectedNumOfWorkers)
 	}
 	// fail if standard deviation is too high
 	if pWorkersSD/pWorkersAVG > 0.1 {
-		t.Error("pWorkersSD/pWorkersAVG > 0.1")
+		t.Error("[WARNING] pWorkersSD/pWorkersAVG > 0.1")
 	}
 
-	t.Logf("throughput: %v\n", throughput)
+	t.Logf("[INFO] throughput: %v\n", throughput)
 	// expectedThroughput calculation assumes the inputPeriod is long enough that there is no backpressure
 	inputPeriodInSeconds := float64(inputPeriod) / float64(time.Second)
 	expectedThroughput := 1 / inputPeriodInSeconds
 	if throughput < 0.85*expectedThroughput {
-		t.Errorf("throughput < %v", 0.85*expectedThroughput)
+		t.Errorf("[WARNING] throughput < %v", 0.85*expectedThroughput)
 	}
 	if throughput > 1.1*expectedThroughput {
-		t.Errorf("throughput > %v", 1.1*expectedThroughput)
+		t.Errorf("[WARNING] throughput > %v", 1.1*expectedThroughput)
 	}
 
 	throughputPerWorker := throughput / pWorkersAVG
-	t.Logf("throughputPerWorker: %v\n", throughputPerWorker)
+	t.Logf("[INFO] throughputPerWorker: %v\n", throughputPerWorker)
 	// expectedThroughputPerWorker calculation assumes the inputPeriod is long enough that there is no backpressure
 	expectedThroughputPerWorker := expectedThroughput / expectedNumOfWorkers
 	if throughputPerWorker < 0.85*expectedThroughputPerWorker {
-		t.Errorf("throughputPerWorker < %v", 0.85*expectedThroughputPerWorker)
+		t.Errorf("[WARNING] throughputPerWorker < %v", 0.85*expectedThroughputPerWorker)
 	}
 	if throughputPerWorker > 1.1*expectedThroughputPerWorker {
-		t.Errorf("throughputPerWorker > %v", 1.1*expectedThroughputPerWorker)
+		t.Errorf("[WARNING] throughputPerWorker > %v", 1.1*expectedThroughputPerWorker)
 	}
 }
 
@@ -211,7 +212,7 @@ func TestPipelineCorrectness(t *testing.T) {
 		return pair[float64, int]{Value: math.Sqrt(float64(job.Payload)), OriginalPayload: job.Payload}, nil
 	}, Retries(1), Name("p1"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
-		t.Errorf("failed to create pool p1: %s", err)
+		t.Errorf("[ERROR] failed to create pool p1: %s", err)
 		return
 	}
 
@@ -220,7 +221,7 @@ func TestPipelineCorrectness(t *testing.T) {
 		return pair[float64, int]{Value: -job.Payload.Value, OriginalPayload: job.Payload.OriginalPayload}, nil
 	}, Name("p2"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
-		t.Errorf("failed to create pool p2: %s", err)
+		t.Errorf("[ERROR] failed to create pool p2: %s", err)
 		return
 	}
 
@@ -229,7 +230,7 @@ func TestPipelineCorrectness(t *testing.T) {
 		return fmt.Sprintf("%.3f", job.Payload.Value), nil
 	}, Name("p3"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
-		t.Errorf("failed to create pool p3: %s", err)
+		t.Errorf("[ERROR] failed to create pool p3: %s", err)
 		return
 	}
 
@@ -248,19 +249,19 @@ func TestPipelineCorrectness(t *testing.T) {
 	seenPayloads := make(map[int]struct{}, submittedCount)
 	for result := range p3.Results {
 		if result.Error != nil {
-			t.Errorf("result contains error: %v", result.Error)
+			t.Errorf("[ERROR] result contains error: %v", result.Error)
 		}
 		resultsCount++
 		if result.Value != fmt.Sprintf("%.3f", -math.Sqrt(float64(result.Job.Payload.OriginalPayload))) {
-			t.Errorf("wrong result: OriginalPayload=%v result.Value=%v", result.Job.Payload.OriginalPayload, result.Value)
+			t.Errorf("[ERROR] wrong result: OriginalPayload=%v result.Value=%v", result.Job.Payload.OriginalPayload, result.Value)
 		}
 		if _, exists := seenPayloads[result.Job.Payload.OriginalPayload]; exists {
-			t.Errorf("duplicate job.Payload=%v", result.Job.Payload.OriginalPayload)
+			t.Errorf("[ERROR] duplicate job.Payload=%v", result.Job.Payload.OriginalPayload)
 		}
 		seenPayloads[result.Job.Payload.OriginalPayload] = struct{}{}
 	}
 	if resultsCount != submittedCount {
-		t.Error("submittedCount != resultsCount")
+		t.Error("[ERROR] submittedCount != resultsCount")
 	}
 }
 
@@ -308,16 +309,16 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 	workersNumErrorAVG := workersNumErrorSum / float64(numOfTests)
 	workersNumRSDAVG := workersNumRSDSum / float64(numOfTests)
 	throughputPerActivationFractionAVG := throughputPerActivationFractionSum / float64(numOfTests)
-	t.Logf("resultsCount average: %v", resultsCountAVG)
-	t.Logf("workersNumError average: %v", workersNumErrorAVG)
-	t.Logf("workersNumRSD average: %v", workersNumRSDAVG)
-	t.Logf("throughputPerActivationFraction average: %v", throughputPerActivationFractionAVG)
+	t.Logf("[INFO] resultsCount average: %v", resultsCountAVG)
+	t.Logf("[INFO] workersNumError average: %v", workersNumErrorAVG)
+	t.Logf("[INFO] workersNumRSD average: %v", workersNumRSDAVG)
+	t.Logf("[INFO] throughputPerActivationFraction average: %v", throughputPerActivationFractionAVG)
 }
 
 func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64, float64, float64) {
 	var logger *log.Logger
 	if *flagDebugLogs {
-		logger = log.Default()
+		logger = log.New(os.Stdout, "[DEBUG] [test] ", log.LstdFlags|log.Lmsgprefix)
 	} else {
 		logger = log.New(io.Discard, "", 0)
 	}
@@ -338,7 +339,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		p1Stats = append(p1Stats, s)
 	}))
 	if err != nil {
-		t.Errorf("failed to create pool p1: %s", err)
+		t.Errorf("[ERROR] failed to create pool p1: %s", err)
 		return 0, math.NaN(), math.NaN(), math.NaN(), math.NaN()
 	}
 
@@ -350,7 +351,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		p2Stats = append(p2Stats, s)
 	}))
 	if err != nil {
-		t.Errorf("failed to create pool p2: %s", err)
+		t.Errorf("[ERROR] failed to create pool p2: %s", err)
 		return 0, math.NaN(), math.NaN(), math.NaN(), math.NaN()
 	}
 
@@ -362,7 +363,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		p3Stats = append(p3Stats, s)
 	}))
 	if err != nil {
-		t.Errorf("failed to create pool p3: %s", err)
+		t.Errorf("[ERROR] failed to create pool p3: %s", err)
 		return 0, math.NaN(), math.NaN(), math.NaN(), math.NaN()
 	}
 
@@ -392,14 +393,14 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 					break
 				}
 			}
-			logger.Printf("[test] submitting job%d - inputPeriodAVG: %v\n", i, inputPeriodAVG)
+			logger.Printf("submitting job%d - inputPeriodAVG: %v\n", i, inputPeriodAVG)
 			p1.Submit(float64(i))
 			inputPeriodNow := time.Since(lastSubmitted)
 			lastSubmitted = time.Now()
 			inputPeriodAVG = time.Duration(a*float64(inputPeriodNow) + (1-a)*float64(inputPeriodAVG))
 		}
-		logger.Printf("[test] submitted %d jobs - calling p.StopAndWait()\n", i)
-		t.Logf("submitted %d jobs\n", i)
+		logger.Printf("submitted %d jobs - calling p.StopAndWait()\n", i)
+		t.Logf("[INFO] submitted %d jobs\n", i)
 		submittedCount = i
 		p1.StopAndWait()
 	}()
@@ -411,35 +412,35 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		outputPeriod := time.Since(lastReceived)
 		lastReceived = time.Now()
 		outputPeriodAVG = time.Duration(a*float64(outputPeriod) + (1-a)*float64(outputPeriodAVG))
-		logger.Println("[test] result:", result.Value, "outputPeriodAVG:", outputPeriodAVG)
+		logger.Println("result:", result.Value, "outputPeriodAVG:", outputPeriodAVG)
 		resultsCount++
 	}
 	if submittedCount != resultsCount {
-		t.Error("submittedCount != resultsCount")
+		t.Error("[ERROR] submittedCount != resultsCount")
 	}
 
 	p1WorkersAVG, p1WorkersSD, _ := processStats(p1Stats, started.Add(30*time.Second), lastSubmitted)
 	p2WorkersAVG, p2WorkersSD, _ := processStats(p2Stats, started.Add(30*time.Second), lastSubmitted)
 	p3WorkersAVG, p3WorkersSD, throughput := processStats(p3Stats, started.Add(30*time.Second), lastSubmitted)
-	t.Logf("[pool=p1] workers: AVG=%v SD=%v\n", p1WorkersAVG, p1WorkersSD)
-	t.Logf("[pool=p2] workers: AVG=%v SD=%v\n", p2WorkersAVG, p2WorkersSD)
-	t.Logf("[pool=p3] workers: AVG=%v SD=%v\n", p3WorkersAVG, p3WorkersSD)
+	t.Logf("[INFO] [pool=p1] workers: AVG=%v SD=%v\n", p1WorkersAVG, p1WorkersSD)
+	t.Logf("[INFO] [pool=p2] workers: AVG=%v SD=%v\n", p2WorkersAVG, p2WorkersSD)
+	t.Logf("[INFO] [pool=p3] workers: AVG=%v SD=%v\n", p3WorkersAVG, p3WorkersSD)
 
 	// p1WorkersAVG should be about 1/3 of p3WorkersAVG
 	p1WorkersExpected := 0.3333 * p3WorkersAVG
 	if p1WorkersAVG < 0.8*p1WorkersExpected-1 {
-		t.Errorf("p1WorkersAVG < %v", 0.8*p1WorkersExpected-1)
+		t.Errorf("[WARNING] p1WorkersAVG < %v", 0.8*p1WorkersExpected-1)
 	}
 	if p1WorkersAVG > 1.2*p1WorkersExpected+1 {
-		t.Errorf("p1WorkersAVG > %v", 1.2*p1WorkersExpected+1)
+		t.Errorf("[WARNING] p1WorkersAVG > %v", 1.2*p1WorkersExpected+1)
 	}
 	// p2WorkersAVG should be about 2/3 of p3WorkersAVG
 	p2WorkersExpected := 0.6666 * p3WorkersAVG
 	if p2WorkersAVG < 0.8*p2WorkersExpected-1 {
-		t.Errorf("p2WorkersAVG < %v", 0.8*p2WorkersExpected-1)
+		t.Errorf("[WARNING] p2WorkersAVG < %v", 0.8*p2WorkersExpected-1)
 	}
 	if p2WorkersAVG > 1.2*p2WorkersExpected+1 {
-		t.Errorf("p2WorkersAVG > %v", 1.2*p2WorkersExpected+1)
+		t.Errorf("[WARNING] p2WorkersAVG > %v", 1.2*p2WorkersExpected+1)
 	}
 	// p3WorkersAVG should be about p3WorkersExpected
 	var p3WorkersExpected float64
@@ -452,31 +453,31 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		p3WorkersExpected = float64(numOfWorkers)
 	}
 	if p3WorkersAVG < 0.9*p3WorkersExpected-1 {
-		t.Errorf("p3WorkersAVG < %v", 0.9*p3WorkersExpected-1)
+		t.Errorf("[WARNING] p3WorkersAVG < %v", 0.9*p3WorkersExpected-1)
 	}
 	if p3WorkersAVG > 1.1*p3WorkersExpected+1 {
-		t.Errorf("p3WorkersAVG > %v", 1.1*p3WorkersExpected+1)
+		t.Errorf("[WARNING] p3WorkersAVG > %v", 1.1*p3WorkersExpected+1)
 	}
 
 	// fail if standard deviation is too high
 	if p1WorkersSD/p1WorkersAVG > 0.1 && p1WorkersSD > 1 {
-		t.Error("p1WorkersSD too high")
+		t.Error("[WARNING] p1WorkersSD too high")
 	}
 	if p2WorkersSD/p2WorkersAVG > 0.1 && p2WorkersSD > 1 {
-		t.Error("p2WorkersSD too high")
+		t.Error("[WARNING] p2WorkersSD too high")
 	}
 	if p3WorkersSD/p3WorkersAVG > 0.05 && p3WorkersSD > 1 {
-		t.Error("p3WorkersSD too high")
+		t.Error("[WARNING] p3WorkersSD too high")
 	}
 
 	workersNumError := math.Sqrt(math.Pow(p1WorkersAVG-p1WorkersExpected, 2)+math.Pow(p2WorkersAVG-p2WorkersExpected, 2)+math.Pow(p3WorkersAVG-p3WorkersExpected, 2)) / p3WorkersExpected
 	workersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
 	activationFraction := (p1WorkersAVG + p2WorkersAVG + p3WorkersAVG) / float64(3*numOfWorkers)
-	t.Logf("workersNumError: %v", workersNumError)
-	t.Logf("workersNumRSD: %v", workersNumRSD)
-	t.Logf("throughput: %v", throughput)
-	t.Logf("activationFraction: %v", activationFraction)
-	t.Logf("throughputPerActivationFraction: %v", float64(throughput)/activationFraction)
+	t.Logf("[INFO] workersNumError: %v", workersNumError)
+	t.Logf("[INFO] workersNumRSD: %v", workersNumRSD)
+	t.Logf("[INFO] throughput: %v", throughput)
+	t.Logf("[INFO] activationFraction: %v", activationFraction)
+	t.Logf("[INFO] throughputPerActivationFraction: %v", float64(throughput)/activationFraction)
 	return resultsCount, workersNumError, workersNumRSD, throughput, activationFraction
 }
 
@@ -527,7 +528,7 @@ func processStats(statsArray []stats, from time.Time, to time.Time) (float64, fl
 
 func loggerIfDebugEnabled() *log.Logger {
 	if *flagDebugLogs {
-		return log.Default()
+		return log.New(os.Stdout, "[DEBUG] ", log.LstdFlags|log.Lmsgprefix)
 	}
 	return nil
 }
