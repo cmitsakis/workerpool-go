@@ -320,6 +320,8 @@ func (p *Pool[I, O, C]) loop() {
 					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f jobID=%d\n", len(p.jobsNew), len(p.jobsQueue), nJobsProcessing, nJobsInSystem, concurrency, loadAvg, jobID)
 				}
 			}
+		} else {
+			loadAvg = 1
 		}
 		if p.monitor != nil {
 			p.monitor(stats{
@@ -346,29 +348,25 @@ func (p *Pool[I, O, C]) loop() {
 				jobIDWhenLastEnabledWorker = jobID
 			}
 		}
-		if !p.fixedWorkers && concurrency > 0 && jobDone {
-			if loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > window2 {
-				// if load is low and we didn't disable a worker recently, disable n workers
-				// n = number of workers we should disable
-				// find n such that:
-				// loadAvg > p.targetLoad*(concurrency-n)/concurrency
-				// loadAvg*concurrency/p.targetLoad > concurrency-n
-				// n + loadAvg*concurrency/p.targetLoad > concurrency
-				// n > concurrency - loadAvg*concurrency/p.targetLoad
-				n := int(float64(concurrency) - loadAvg*float64(concurrency)/p.targetLoad)
-				if int(concurrency)-n <= 0 {
-					n = int(concurrency) - 1
-				}
-				if n > 0 {
-					if p.loggerDebug != nil {
-						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, n)
-					}
-					p.disableWorkers(n)
-					doneCounterWhenLastDisabledWorker = doneCounter
-				}
+		if !p.fixedWorkers && jobDone && concurrency > 0 && loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > window2 {
+			// if load is low and we didn't disable a worker recently, disable n workers
+			// n = number of workers we should disable
+			// find n such that:
+			// loadAvg > p.targetLoad*(concurrency-n)/concurrency
+			// loadAvg*concurrency/p.targetLoad > concurrency-n
+			// n + loadAvg*concurrency/p.targetLoad > concurrency
+			// n > concurrency - loadAvg*concurrency/p.targetLoad
+			n := int(float64(concurrency) - loadAvg*float64(concurrency)/p.targetLoad)
+			if int(concurrency)-n <= 0 {
+				n = int(concurrency) - 1
 			}
-		} else if concurrency == 0 {
-			loadAvg = 1
+			if n > 0 {
+				if p.loggerDebug != nil {
+					p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, n)
+				}
+				p.disableWorkers(n)
+				doneCounterWhenLastDisabledWorker = doneCounter
+			}
 		}
 		jobDone = false
 		// make sure not all workers are disabled while there are jobs
