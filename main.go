@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -288,6 +289,7 @@ type stats struct {
 
 func (p *Pool[I, O, C]) loop() {
 	var loadAvg float64 = 1
+	var lenResultsAVG float64
 	var jobID int
 	var jobIDWhenLastEnabledWorker int
 	var doneCounter int
@@ -305,8 +307,12 @@ func (p *Pool[I, O, C]) loop() {
 	a := 2 / (float64(window) + 1)
 	// window2 is used as the number of jobs that have to pass
 	// before we enable or disable workers again
-	window2 := p.maxActiveWorkers
+	window2 := window
+	// initialize with negative value so we don't wait 'window2' submissions for auto-scaling to run for the 1st time
+	jobIDWhenLastEnabledWorker = -window2 / 2
+	doneCounterWhenLastDisabledWorker = -window2 / 2
 	for p.jobsNew != nil || p.jobsDone != nil {
+		lenResultsAVG = a*float64(len(p.Results)) + (1-a)*lenResultsAVG
 		concurrency := atomic.LoadInt32(&p.concurrency)
 		if concurrency > 0 {
 			// concurrency > 0 so we can divide
@@ -315,9 +321,9 @@ func (p *Pool[I, O, C]) loop() {
 			if p.loggerDebug != nil {
 				nJobsProcessing := atomic.LoadInt32(&p.nJobsProcessing)
 				if jobDone {
-					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f doneCounter=%d\n", len(p.jobsNew), len(p.jobsQueue), nJobsProcessing, nJobsInSystem, concurrency, loadAvg, doneCounter)
+					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d lenResultsAVG=%.2f nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f doneCounter=%d\n", len(p.jobsNew), len(p.jobsQueue), lenResultsAVG, nJobsProcessing, nJobsInSystem, concurrency, loadAvg, doneCounter)
 				} else {
-					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f jobID=%d\n", len(p.jobsNew), len(p.jobsQueue), nJobsProcessing, nJobsInSystem, concurrency, loadAvg, jobID)
+					p.loggerDebug.Printf("[workerpool/loop] len(jobsNew)=%d len(jobsQueue)=%d lenResultsAVG=%.2f nJobsProcessing=%d nJobsInSystem=%d concurrency=%d loadAvg=%.2f jobID=%d\n", len(p.jobsNew), len(p.jobsQueue), lenResultsAVG, nJobsProcessing, nJobsInSystem, concurrency, loadAvg, jobID)
 				}
 			}
 		} else {
@@ -340,7 +346,9 @@ func (p *Pool[I, O, C]) loop() {
 			// loadAvg*concurrency/p.targetLoad = concurrency+n
 			// loadAvg*concurrency/p.targetLoad - concurrency = n
 			// concurrency*(loadAvg/p.targetLoad - 1) = n
-			n := int(float64(concurrency) * (loadAvg/p.targetLoad - 1))
+			// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
+			// in order to reduce n if there is backpressure and len(p.Results) == 0 was temporary
+			n := int(float64(concurrency) * (loadAvg/p.targetLoad - 1) * (1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers))))
 			if n > 0 {
 				if p.loggerDebug != nil {
 					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
