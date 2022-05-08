@@ -298,9 +298,11 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 	var workersNumErrorSum float64
 	var workersNumRSDSum float64
 	var throughputPerActivationFractionSum float64
+	var numOfTests int
 	for _, w := range numOfWorkersSlice {
 		for _, p := range inputPeriodSlice {
 			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
+				numOfTests++
 				resultsCount, workersNumError, workersNumRSD, throughput, activationFraction := testPipelineAutoscalingBehaviorCase(t, w, p)
 				resultsCountSum += resultsCount
 				workersNumErrorSum += workersNumError
@@ -316,7 +318,6 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 			})
 		}
 	}
-	numOfTests := len(numOfWorkersSlice) * len(inputPeriodSlice)
 	resultsCountAVG := resultsCountSum / numOfTests
 	workersNumErrorAVG := workersNumErrorSum / float64(numOfTests)
 	workersNumRSDAVG := workersNumRSDSum / float64(numOfTests)
