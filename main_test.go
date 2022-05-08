@@ -209,19 +209,19 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 	}
 }
 
-type pair[V, P any] struct {
+type valueWithOriginalPayload[V, P any] struct {
 	Value           V
 	OriginalPayload P
 }
 
 func TestPipelineCorrectness(t *testing.T) {
 	// stage 1: calculate square root
-	p1, err := NewPoolWithResults(5, func(job Job[int], workerID int) (pair[float64, int], error) {
+	p1, err := NewPoolWithResults(5, func(job Job[int], workerID int) (valueWithOriginalPayload[float64, int], error) {
 		// fail the first attempt only
 		if job.Attempt == 0 {
-			return pair[float64, int]{0, 0}, ErrorWrapRetryable(fmt.Errorf("failed"))
+			return valueWithOriginalPayload[float64, int]{0, 0}, ErrorWrapRetryable(fmt.Errorf("failed"))
 		}
-		return pair[float64, int]{Value: math.Sqrt(float64(job.Payload)), OriginalPayload: job.Payload}, nil
+		return valueWithOriginalPayload[float64, int]{Value: math.Sqrt(float64(job.Payload)), OriginalPayload: job.Payload}, nil
 	}, Retries(1), Name("p1"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
 		t.Errorf("[ERROR] failed to create pool p1: %s", err)
@@ -229,8 +229,8 @@ func TestPipelineCorrectness(t *testing.T) {
 	}
 
 	// stage 2: negate number
-	p2, err := NewPoolWithResults(5, func(job Job[pair[float64, int]], workerID int) (pair[float64, int], error) {
-		return pair[float64, int]{Value: -job.Payload.Value, OriginalPayload: job.Payload.OriginalPayload}, nil
+	p2, err := NewPoolWithResults(5, func(job Job[valueWithOriginalPayload[float64, int]], workerID int) (valueWithOriginalPayload[float64, int], error) {
+		return valueWithOriginalPayload[float64, int]{Value: -job.Payload.Value, OriginalPayload: job.Payload.OriginalPayload}, nil
 	}, Name("p2"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
 		t.Errorf("[ERROR] failed to create pool p2: %s", err)
@@ -238,7 +238,7 @@ func TestPipelineCorrectness(t *testing.T) {
 	}
 
 	// stage 3: convert float to string
-	p3, err := NewPoolWithResults(5, func(job Job[pair[float64, int]], workerID int) (string, error) {
+	p3, err := NewPoolWithResults(5, func(job Job[valueWithOriginalPayload[float64, int]], workerID int) (string, error) {
 		return fmt.Sprintf("%.3f", job.Payload.Value), nil
 	}, Name("p3"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
