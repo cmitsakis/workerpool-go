@@ -332,14 +332,15 @@ func (p *Pool[I, O, C]) loop() {
 				DoneCounter:   doneCounter,
 			})
 		}
-		if !p.fixedWorkers && !jobDone && loadAvg > p.targetLoad*float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > window2 && len(p.Results) == 0 {
+		if !p.fixedWorkers && !jobDone && loadAvg/p.targetLoad > float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > window2 && len(p.Results) == 0 {
 			// if load is high, and we haven't enabled a worker recently, and len(p.Results) == 0, enable n workers
 			// n = number of workers we should enable
 			// find n such that:
-			// loadAvg < p.targetLoad*(concurrency+n)/concurrency
-			// loadAvg*concurrency/p.targetLoad < concurrency+n
-			// loadAvg*concurrency/p.targetLoad - concurrency < n
-			n := int(loadAvg*float64(concurrency)/p.targetLoad - float64(concurrency))
+			// loadAvg/p.targetLoad = (concurrency+n)/concurrency
+			// loadAvg*concurrency/p.targetLoad = concurrency+n
+			// loadAvg*concurrency/p.targetLoad - concurrency = n
+			// concurrency*(loadAvg/p.targetLoad - 1) = n
+			n := int(float64(concurrency) * (loadAvg/p.targetLoad - 1))
 			if n > 0 {
 				if p.loggerDebug != nil {
 					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
@@ -348,15 +349,16 @@ func (p *Pool[I, O, C]) loop() {
 				jobIDWhenLastEnabledWorker = jobID
 			}
 		}
-		if !p.fixedWorkers && jobDone && concurrency > 0 && loadAvg < p.targetLoad*float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > window2 {
+		if !p.fixedWorkers && jobDone && concurrency > 0 && loadAvg/p.targetLoad < float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > window2 {
 			// if load is low and we didn't disable a worker recently, disable n workers
 			// n = number of workers we should disable
 			// find n such that:
-			// loadAvg > p.targetLoad*(concurrency-n)/concurrency
-			// loadAvg*concurrency/p.targetLoad > concurrency-n
-			// n + loadAvg*concurrency/p.targetLoad > concurrency
-			// n > concurrency - loadAvg*concurrency/p.targetLoad
-			n := int(float64(concurrency) - loadAvg*float64(concurrency)/p.targetLoad)
+			// loadAvg/p.targetLoad = (concurrency-n)/concurrency
+			// loadAvg*concurrency/p.targetLoad = concurrency-n
+			// n + loadAvg*concurrency/p.targetLoad = concurrency
+			// n = concurrency - loadAvg*concurrency/p.targetLoad
+			// n = concurrency * (1 - loadAvg/p.targetLoad)
+			n := int(float64(concurrency) * (1 - loadAvg/p.targetLoad))
 			if int(concurrency)-n <= 0 {
 				n = int(concurrency) - 1
 			}
