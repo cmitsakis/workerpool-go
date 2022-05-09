@@ -47,12 +47,19 @@ type Pool[I, O, C any] struct {
 	wgWorkers        sync.WaitGroup
 	nJobsProcessing  int32
 	jobsDone         chan Result[I, O]
-	Results          chan Result[I, O]
-	enableWorker     chan struct{}
-	disableWorker    chan struct{}
-	monitor          func(s stats)
-	cancelWorkers    context.CancelFunc
-	loopDone         chan struct{}
+	// If the pool is created by the constructors
+	// NewPoolWithResults() or NewPoolWithResultsAndInit(),
+	// results are written to this channel,
+	// and you must consume from this channel in a loop until it is closed.
+	// If the pool is created by the constructors
+	// NewPoolSimple() or NewPoolWithInit(),
+	// this channel is nil.
+	Results       chan Result[I, O]
+	enableWorker  chan struct{}
+	disableWorker chan struct{}
+	monitor       func(s stats)
+	cancelWorkers context.CancelFunc
+	loopDone      chan struct{}
 }
 
 // NewPoolSimple creates a new worker pool.
@@ -71,7 +78,8 @@ func NewPoolWithInit[I, C any](maxActiveWorkers int, handler func(job Job[I], wo
 	return newPool[I, struct{}, C](maxActiveWorkers, handler2, workerInit, workerDeinit, false, options...)
 }
 
-// NewPoolWithResults creates a new worker pool with Results channel. You should consume from this channel until it is closed.
+// NewPoolWithResults creates a new worker pool with Results channel.
+// You must consume from this channel in a loop until it is closed.
 func NewPoolWithResults[I, O any](maxActiveWorkers int, handler func(job Job[I], workerID int) (O, error), options ...func(*poolConfig) error) (*Pool[I, O, struct{}], error) {
 	handler2 := func(job Job[I], workerID int, connection struct{}) (O, error) {
 		return handler(job, workerID)
@@ -79,7 +87,8 @@ func NewPoolWithResults[I, O any](maxActiveWorkers int, handler func(job Job[I],
 	return newPool[I, O, struct{}](maxActiveWorkers, handler2, nil, nil, true, options...)
 }
 
-// NewPoolWithResultsAndInit creates a new worker pool with workerInit() and workerDeinit() functions and Results channel. You should consume from this channel until it is closed.
+// NewPoolWithResultsAndInit creates a new worker pool with workerInit() and workerDeinit() functions and Results channel.
+// You must consume from this channel in a loop until it is closed.
 func NewPoolWithResultsAndInit[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerID int, connection C) (O, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[I, O, C], error) {
 	return newPool[I, O, C](maxActiveWorkers, handler, workerInit, workerDeinit, true, options...)
 }
@@ -180,20 +189,25 @@ func (p *Pool[I, O, C]) loop() {
 	var doneCounterWhenResultsFull int
 	var nJobsInSystem int
 	var jobDone bool
+
 	// calculate decay factor "a"
-	// of the exponentially weighted moving average
-	// of loadAvg
+	// of the exponentially weighted moving average.
+	// first we calculate the "window" (formula found experimentaly),
+	// and then "a" using the formula a = 2/(window+1) (commonly used formula for a)
 	window := p.maxActiveWorkers / 2
 	if window < 5 {
 		window = 5
 	}
 	a := 2 / (float64(window) + 1)
+
 	// window2 is used as the number of jobs that have to pass
 	// before we enable or disable workers again
 	window2 := window
+
 	// initialize with negative value so we don't wait 'window2' submissions for auto-scaling to run for the 1st time
 	jobIDWhenLastEnabledWorker = -window2 / 2
 	doneCounterWhenLastDisabledWorker = -window2 / 2
+
 	for p.jobsNew != nil || p.jobsDone != nil {
 		lenResultsAVG = a*float64(len(p.Results)) + (1-a)*lenResultsAVG
 		concurrency := atomic.LoadInt32(&p.concurrency)
@@ -432,8 +446,7 @@ func (p *Pool[I, O, C]) StopAndWait() {
 // or passes them to the handleError function if there is an error.
 //
 // Once you call StopAndWait() on the first pool,
-// after a while p1.Results get closed,
-// so this loop exits and p2.StopAndWait() is called.
+// after a while p1.Results get closed, and p2.StopAndWait() is called.
 // This way StopAndWait() propagates through the pipeline.
 //
 // WARNING: Should only be used if the first pool has a not-nil Results channel.
