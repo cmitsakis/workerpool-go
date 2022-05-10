@@ -235,54 +235,63 @@ func (p *Pool[I, O, C]) loop() {
 				DoneCounter:   doneCounter,
 			})
 		}
-		if !p.fixedWorkers && !jobDone && loadAvg/p.targetLoad > float64(concurrency+1)/float64(concurrency) && jobID-jobIDWhenLastEnabledWorker > window2 && len(p.Results) == 0 {
-			// if load is high, and we haven't enabled a worker recently, and len(p.Results) == 0, enable n workers
-			// n = number of workers we should enable
-			// find n such that:
-			// loadAvg/p.targetLoad = (concurrency+n)/concurrency
-			// loadAvg*concurrency/p.targetLoad = concurrency+n
-			// loadAvg*concurrency/p.targetLoad - concurrency = n
-			// concurrency*(loadAvg/p.targetLoad - 1) = n
-			// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
-			// in order to reduce n if there is backpressure and len(p.Results) == 0 was temporary
-			n := int(float64(concurrency) * (loadAvg/p.targetLoad - 1) * (1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers))))
-			if n > 0 {
-				if p.loggerDebug != nil {
-					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
+		if !p.fixedWorkers {
+			// if this is not a pool with fixed number of workers, run auto-scaling
+			if !jobDone && // if we received a new job in the previous iteration
+				loadAvg/p.targetLoad > float64(concurrency+1)/float64(concurrency) && // and load is high
+				jobID-jobIDWhenLastEnabledWorker > window2 && // and we haven't enabled a worker recently
+				len(p.Results) == 0 { // and there are no backpressure
+				// enable n workers
+				// n = number of workers we should enable
+				// find n such that:
+				// loadAvg/p.targetLoad = (concurrency+n)/concurrency
+				// loadAvg*concurrency/p.targetLoad = concurrency+n
+				// loadAvg*concurrency/p.targetLoad - concurrency = n
+				// concurrency*(loadAvg/p.targetLoad - 1) = n
+				// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
+				// in order to reduce n if there is backpressure and len(p.Results) == 0 was temporary
+				n := int(float64(concurrency) * (loadAvg/p.targetLoad - 1) * (1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers))))
+				if n > 0 {
+					if p.loggerDebug != nil {
+						p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
+					}
+					p.enableWorkers(n)
+					jobIDWhenLastEnabledWorker = jobID
 				}
-				p.enableWorkers(n)
-				jobIDWhenLastEnabledWorker = jobID
 			}
-		}
-		if !p.fixedWorkers && jobDone && concurrency > 0 && loadAvg/p.targetLoad < float64(concurrency-1)/float64(concurrency) && doneCounter-doneCounterWhenLastDisabledWorker > window2 {
-			// if load is low and we didn't disable a worker recently, disable n workers
-			// n = number of workers we should disable
-			// find n such that:
-			// loadAvg/p.targetLoad = (concurrency-n)/concurrency
-			// loadAvg*concurrency/p.targetLoad = concurrency-n
-			// n + loadAvg*concurrency/p.targetLoad = concurrency
-			// n = concurrency - loadAvg*concurrency/p.targetLoad
-			// n = concurrency * (1 - loadAvg/p.targetLoad)
-			n := int(float64(concurrency) * (1 - loadAvg/p.targetLoad))
-			if int(concurrency)-n <= 0 {
-				n = int(concurrency) - 1
-			}
-			if n > 0 {
-				if p.loggerDebug != nil {
-					p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, n)
+			if jobDone && // if a job was done in the previous iteration
+				concurrency > 0 &&
+				loadAvg/p.targetLoad < float64(concurrency-1)/float64(concurrency) && // and load is low
+				doneCounter-doneCounterWhenLastDisabledWorker > window2 { // and we haven't disable a worker recently
+				// disable n workers
+				// n = number of workers we should disable
+				// find n such that:
+				// loadAvg/p.targetLoad = (concurrency-n)/concurrency
+				// loadAvg*concurrency/p.targetLoad = concurrency-n
+				// n + loadAvg*concurrency/p.targetLoad = concurrency
+				// n = concurrency - loadAvg*concurrency/p.targetLoad
+				// n = concurrency * (1 - loadAvg/p.targetLoad)
+				n := int(float64(concurrency) * (1 - loadAvg/p.targetLoad))
+				if int(concurrency)-n <= 0 {
+					n = int(concurrency) - 1
 				}
-				p.disableWorkers(n)
-				doneCounterWhenLastDisabledWorker = doneCounter
+				if n > 0 {
+					if p.loggerDebug != nil {
+						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, n)
+					}
+					p.disableWorkers(n)
+					doneCounterWhenLastDisabledWorker = doneCounter
+				}
+			}
+			// make sure not all workers are disabled while there are jobs
+			if concurrency == 0 && nJobsInSystem > 0 {
+				if p.loggerDebug != nil {
+					p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] no active worker. try to enable new worker", doneCounter)
+				}
+				p.enableWorkers(1)
 			}
 		}
 		jobDone = false
-		// make sure not all workers are disabled while there are jobs
-		if !p.fixedWorkers && concurrency == 0 && nJobsInSystem > 0 {
-			if p.loggerDebug != nil {
-				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] no active worker. try to enable new worker", doneCounter)
-			}
-			p.enableWorkers(1)
-		}
 		if nJobsInSystem >= p.maxActiveWorkers {
 			// if there are p.maxActiveWorkers jobs don't accept new jobs
 			// len(p.jobsQueue) = p.maxActiveWorkers
