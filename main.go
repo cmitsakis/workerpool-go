@@ -240,7 +240,7 @@ func (p *Pool[I, O, C]) loop() {
 			if !jobDone && // if we received a new job in the previous iteration
 				loadAvg/p.targetLoad > float64(concurrency+1)/float64(concurrency) && // and load is high
 				jobID-jobIDWhenLastEnabledWorker > window2 && // and we haven't enabled a worker recently
-				len(p.Results) == 0 { // and there are no backpressure
+				len(p.Results) == 0 { // and there is no backpressure
 				// enable n workers
 				// n = number of workers we should enable
 				// find n such that:
