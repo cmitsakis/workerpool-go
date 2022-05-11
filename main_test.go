@@ -505,7 +505,9 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		t.Error("[WARNING] p3WorkersSD too high")
 	}
 
-	workersNumError := math.Sqrt(math.Pow(p1WorkersAVG-p1WorkersExpected, 2)+math.Pow(p2WorkersAVG-p2WorkersExpected, 2)+math.Pow(p3WorkersAVG-p3WorkersExpected, 2)) / p3WorkersExpected
+	workersNumError := math.Abs(p1WorkersAVG-p1WorkersExpected)/p1WorkersExpected +
+		math.Abs(p2WorkersAVG-p2WorkersExpected)/p2WorkersExpected +
+		math.Abs(p3WorkersAVG-p3WorkersExpected)/p3WorkersExpected
 	workersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
 	activationFraction := (p1WorkersAVG + p2WorkersAVG + p3WorkersAVG) / float64(3*numOfWorkers)
 	t.Logf("[INFO] workersNumError: %v", workersNumError)
