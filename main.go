@@ -242,21 +242,19 @@ func (p *Pool[I, O, C]) loop() {
 				loadAvg/p.targetLoad > float64(concurrency+1)/float64(concurrency) && // and load is high
 				jobID-jobIDWhenLastEnabledWorker > window2 && // and we haven't enabled a worker recently
 				len(p.Results) == 0 { // and there is no backpressure
-				// enable n workers
-				// n = number of workers we should enable
-				// find n such that:
-				// loadAvg/p.targetLoad = (concurrency+n)/concurrency
-				// loadAvg*concurrency/p.targetLoad = concurrency+n
-				// loadAvg*concurrency/p.targetLoad - concurrency = n
-				// concurrency*(loadAvg/p.targetLoad - 1) = n
+				// calculate desired concurrency
+				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
+				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
+				concurrencyDiffFloat := concurrencyDesired - float64(concurrency)
 				// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
-				// in order to reduce n if there is backpressure and len(p.Results) == 0 was temporary
-				n := int(float64(concurrency) * (loadAvg/p.targetLoad - 1) * (1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers))))
-				if n > 0 {
+				// in order to reduce concurrencyDiff if there is backpressure and len(p.Results) == 0 was temporary
+				concurrencyDiffFloat = concurrencyDiffFloat * (1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers)))
+				concurrencyDiff := int(concurrencyDiffFloat)
+				if concurrencyDiff > 0 {
 					if p.loggerDebug != nil {
-						p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, n)
+						p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, concurrencyDiff)
 					}
-					p.enableWorkers(n)
+					p.enableWorkers(concurrencyDiff)
 					jobIDWhenLastEnabledWorker = jobID
 				}
 			}
@@ -264,33 +262,34 @@ func (p *Pool[I, O, C]) loop() {
 				concurrency > 0 &&
 				loadAvg/p.targetLoad < float64(concurrency-1)/float64(concurrency) && // and load is low
 				doneCounter-doneCounterWhenLastDisabledWorker > window2 { // and we haven't disable a worker recently
-				// disable n workers
-				// n = number of workers we should disable
-				// find n such that:
-				// loadAvg/p.targetLoad = (concurrency-n)/concurrency
-				// loadAvg*concurrency/p.targetLoad = concurrency-n
-				// n + loadAvg*concurrency/p.targetLoad = concurrency
-				// n = concurrency - loadAvg*concurrency/p.targetLoad
-				// n = concurrency * (1 - loadAvg/p.targetLoad)
-				n := int(float64(concurrency) * (1 - loadAvg/p.targetLoad))
-				if int(concurrency)-n <= 0 {
-					n = int(concurrency) - 1
+				// calculate desired concurrency
+				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
+				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
+				if concurrencyDesired <= 0 {
+					concurrencyDesired = 1
 				}
-				if n > 0 {
+				concurrencyDiff := int(concurrencyDesired - float64(concurrency))
+				if concurrencyDiff < 0 {
 					if p.loggerDebug != nil {
-						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, n)
+						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, -concurrencyDiff)
 					}
-					p.disableWorkers(n)
+					p.disableWorkers(-concurrencyDiff)
 					doneCounterWhenLastDisabledWorker = doneCounter
 				}
 			}
 			if resultsBlocked {
 				if doneCounter-doneCounterWhenResultsBlocked > window2 {
-					n := int(concurrency) / 2
-					if p.loggerDebug != nil {
-						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, n)
+					concurrencyDesired := concurrency / 2
+					if concurrencyDesired <= 0 {
+						concurrencyDesired = 1
 					}
-					p.disableWorkers(n)
+					concurrencyDiff := int(concurrencyDesired - concurrency)
+					if concurrencyDiff < 0 {
+						if p.loggerDebug != nil {
+							p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, -concurrencyDiff)
+						}
+						p.disableWorkers(-concurrencyDiff)
+					}
 				}
 				doneCounterWhenResultsBlocked = doneCounter
 			}
