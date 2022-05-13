@@ -186,9 +186,10 @@ func (p *Pool[I, O, C]) loop() {
 	var jobIDWhenLastEnabledWorker int
 	var doneCounter int
 	var doneCounterWhenLastDisabledWorker int
-	var doneCounterWhenResultsFull int
+	var doneCounterWhenResultsBlocked int
 	var nJobsInSystem int
 	var jobDone bool
+	var resultsBlocked bool
 
 	// calculate decay factor "a"
 	// of the exponentially weighted moving average.
@@ -207,24 +208,6 @@ func (p *Pool[I, O, C]) loop() {
 	// initialize with negative value so we don't wait 'window2' submissions for auto-scaling to run for the 1st time
 	jobIDWhenLastEnabledWorker = -window2 / 2
 	doneCounterWhenLastDisabledWorker = -window2 / 2
-
-	writeResultAndDisableWorkersIfBlocked := func(result Result[I, O]) {
-		select {
-		case p.Results <- result:
-		default:
-			if doneCounter-doneCounterWhenResultsFull > window2 {
-				// do not disable any workers if we did so recently
-				concurrency := atomic.LoadInt32(&p.concurrency)
-				n := int(concurrency) / 2
-				if p.loggerDebug != nil {
-					p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, n)
-				}
-				p.disableWorkers(n)
-			}
-			p.Results <- result
-			doneCounterWhenResultsFull = doneCounter
-		}
-	}
 
 	for p.jobsNew != nil || p.jobsDone != nil {
 		lenResultsAVG = a*float64(len(p.Results)) + (1-a)*lenResultsAVG
@@ -301,6 +284,16 @@ func (p *Pool[I, O, C]) loop() {
 					doneCounterWhenLastDisabledWorker = doneCounter
 				}
 			}
+			if resultsBlocked {
+				if doneCounter-doneCounterWhenResultsBlocked > window2 {
+					n := int(concurrency) / 2
+					if p.loggerDebug != nil {
+						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, n)
+					}
+					p.disableWorkers(n)
+				}
+				doneCounterWhenResultsBlocked = doneCounter
+			}
 			// make sure not all workers are disabled while there are jobs
 			if concurrency == 0 && nJobsInSystem > 0 {
 				if p.loggerDebug != nil {
@@ -310,6 +303,7 @@ func (p *Pool[I, O, C]) loop() {
 			}
 		}
 		jobDone = false
+		resultsBlocked = false
 		if nJobsInSystem >= p.maxActiveWorkers {
 			// if there are p.maxActiveWorkers jobs don't accept new jobs
 			// len(p.jobsQueue) = p.maxActiveWorkers
@@ -323,7 +317,12 @@ func (p *Pool[I, O, C]) loop() {
 					continue
 				}
 				if p.Results != nil {
-					writeResultAndDisableWorkersIfBlocked(result)
+					select {
+					case p.Results <- result:
+					default:
+						p.Results <- result
+						resultsBlocked = true
+					}
 				}
 				nJobsInSystem--
 				doneCounter++
@@ -351,7 +350,12 @@ func (p *Pool[I, O, C]) loop() {
 					continue
 				}
 				if p.Results != nil {
-					writeResultAndDisableWorkersIfBlocked(result)
+					select {
+					case p.Results <- result:
+					default:
+						p.Results <- result
+						resultsBlocked = true
+					}
 				}
 				nJobsInSystem--
 				doneCounter++
