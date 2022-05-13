@@ -208,6 +208,24 @@ func (p *Pool[I, O, C]) loop() {
 	jobIDWhenLastEnabledWorker = -window2 / 2
 	doneCounterWhenLastDisabledWorker = -window2 / 2
 
+	writeResultAndDisableWorkersIfBlocked := func(result Result[I, O]) {
+		select {
+		case p.Results <- result:
+		default:
+			if doneCounter-doneCounterWhenResultsFull > window2 {
+				// do not disable any workers if we did so recently
+				concurrency := atomic.LoadInt32(&p.concurrency)
+				n := int(concurrency) / 2
+				if p.loggerDebug != nil {
+					p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, n)
+				}
+				p.disableWorkers(n)
+			}
+			p.Results <- result
+			doneCounterWhenResultsFull = doneCounter
+		}
+	}
+
 	for p.jobsNew != nil || p.jobsDone != nil {
 		lenResultsAVG = a*float64(len(p.Results)) + (1-a)*lenResultsAVG
 		concurrency := atomic.LoadInt32(&p.concurrency)
@@ -305,10 +323,7 @@ func (p *Pool[I, O, C]) loop() {
 					continue
 				}
 				if p.Results != nil {
-					blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull, window2)
-					if blocked {
-						doneCounterWhenResultsFull = doneCounter
-					}
+					writeResultAndDisableWorkersIfBlocked(result)
 				}
 				nJobsInSystem--
 				doneCounter++
@@ -336,10 +351,7 @@ func (p *Pool[I, O, C]) loop() {
 					continue
 				}
 				if p.Results != nil {
-					blocked := p.writeResultAndDisableWorkersIfBlocked(result, doneCounter, doneCounterWhenResultsFull, window2)
-					if blocked {
-						doneCounterWhenResultsFull = doneCounter
-					}
+					writeResultAndDisableWorkersIfBlocked(result)
 				}
 				nJobsInSystem--
 				doneCounter++
@@ -358,25 +370,6 @@ func (p *Pool[I, O, C]) loop() {
 		p.loggerDebug.Println("[workerpool/loop] finished")
 	}
 	p.loopDone <- struct{}{}
-}
-
-func (p *Pool[I, O, C]) writeResultAndDisableWorkersIfBlocked(result Result[I, O], doneCounter, doneCounterWhenResultsFull, window2 int) bool {
-	select {
-	case p.Results <- result:
-		return false
-	default:
-		if doneCounter-doneCounterWhenResultsFull > window2 {
-			// do not disable any workers if we did so recently
-			concurrency := atomic.LoadInt32(&p.concurrency)
-			n := int(concurrency) / 2
-			if p.loggerDebug != nil {
-				p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] p.Results is full. try to disable %d workers\n", doneCounter, n)
-			}
-			p.disableWorkers(n)
-		}
-		p.Results <- result
-		return true
-	}
 }
 
 func (p *Pool[I, O, C]) disableWorkers(n int) {
