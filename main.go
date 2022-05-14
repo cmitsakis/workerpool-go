@@ -160,7 +160,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	}
 	p.concurrencyIs0 = make(chan struct{}, 1)
 	p.enableWorker = make(chan struct{}, 1)
-	p.disableWorker = make(chan struct{}, 1)
+	p.disableWorker = make(chan struct{}, p.maxActiveWorkers)
 	p.loopDone = make(chan struct{})
 	go p.loop()
 	for i := 0; i < p.maxActiveWorkers; i++ {
@@ -186,10 +186,13 @@ func (p *Pool[I, O, C]) loop() {
 	var jobIDWhenLastEnabledWorker int
 	var doneCounter int
 	var doneCounterWhenLastDisabledWorker int
-	var doneCounterWhenResultsBlocked int
+	var doneCounterWhenDisabledWorkerResultsBlocked int
 	var nJobsInSystem int
 	var jobDone bool
 	var resultsBlocked bool
+
+	// concurrencyThreshold stores the value of p.concurrency at the last time write to the p.Results channel blocked
+	concurrencyThreshold := int32(p.maxActiveWorkers)
 
 	// calculate decay factor "a"
 	// of the exponentially weighted moving average.
@@ -245,6 +248,11 @@ func (p *Pool[I, O, C]) loop() {
 				// calculate desired concurrency
 				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
 				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
+				// reduce desired concurrency if it exceeds threshold
+				willExceedThreshold := concurrencyDesired - float64(concurrencyThreshold)
+				if willExceedThreshold > 0 {
+					concurrencyDesired = float64(concurrencyThreshold) + 0.3*willExceedThreshold
+				}
 				concurrencyDiffFloat := concurrencyDesired - float64(concurrency)
 				// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
 				// in order to reduce concurrencyDiff if there is backpressure and len(p.Results) == 0 was temporary
@@ -278,20 +286,21 @@ func (p *Pool[I, O, C]) loop() {
 				}
 			}
 			if resultsBlocked {
-				if doneCounter-doneCounterWhenResultsBlocked > window2 {
-					concurrencyDesired := concurrency / 2
+				if doneCounter-doneCounterWhenDisabledWorkerResultsBlocked > window2 {
+					concurrencyThreshold = concurrency
+					concurrencyDesired := 0.9 * float64(concurrency)
 					if concurrencyDesired <= 0 {
 						concurrencyDesired = 1
 					}
-					concurrencyDiff := int(concurrencyDesired - concurrency)
+					concurrencyDiff := int(concurrencyDesired - float64(concurrency))
 					if concurrencyDiff < 0 {
 						if p.loggerDebug != nil {
 							p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, -concurrencyDiff)
 						}
 						p.disableWorkers(-concurrencyDiff)
+						doneCounterWhenDisabledWorkerResultsBlocked = doneCounter
 					}
 				}
-				doneCounterWhenResultsBlocked = doneCounter
 			}
 			// make sure not all workers are disabled while there are jobs
 			if concurrency == 0 && nJobsInSystem > 0 {
