@@ -2,26 +2,25 @@
 
 Worker pool library with auto-scaling, backpressure, and easy composability of pools into pipelines. Uses Go 1.18 generics.
 
+**Notable differences from other worker pool libraries:**
+
+- Each worker runs init/deinit functions (if set) when it starts/stops respectively,
+  and stores the value returned by the init function (e.g. a connection, or external process) for the duration of the time it is active.
+  This way you can easily create a **connection pool** for a crawler or email sender.
+- You don't submit a function for each job. Instead you pass a handler function at the creation of the pool and then you submit a value (payload) for each job.
+- You can connect worker pools into a **pipeline**. This way you can increase performance by separating IO-intensive from CPU-intensive tasks (see [crawler example](#crawler-pipeline-example)), or IO tasks of different parallelizability (e.g. crawling and saving to disk).
+
 **backpressure:**
 The pool includes a queue with limited capacity.
-If too many jobs are submitted and the queue is full, submissions block.
+If the queue is full, job submissions block until they can be put in queue.
 
 **auto-scaling:**
 If too many jobs are in queue, new workers are started (if available).
 If there are more active workers than needed some workers are stopped.
+You can disable auto-scaling for CPU intensive tasks.
 
 **steady-state behavior:**
 If the rate of job submissions is constant, the number of active workers will quickly become almost constant, and the output rate will be equal to the input (submission) rate.
-
-**Notable differences from other worker pool libraries:**
-
-- Each worker can maintain a value (e.g. a connection) for the duration of the time it is active.
-  This is the value that is returned by the worker initialization function.
-  This way you can easily create a **connection pool** for a crawler or email sender.
-- You don't submit a closure for each job. Instead you pass a handler function at the creation of the pool and then you **submit values** (job payloads).
-- You can connect worker pools into a **pipeline**. This way you can increase performance by separating IO-intensive from CPU-intensive tasks (see [crawler example](#crawler-pipeline-example)), or IO tasks of different parallelizability (e.g. crawling and saving to disk).
-
-Under development. API is subject to change.
 
 ## Installation
 
@@ -34,6 +33,8 @@ go get go.mitsakis.org/workerpool
 ## Documentation
 
 <https://pkg.go.dev/go.mitsakis.org/workerpool>
+
+Under development. API is subject to change.
 
 ## Usage
 
@@ -231,11 +232,11 @@ func main() {
 
 ## Contributing
 
-### non-code contributions
+### Non-code Contributions
 
 Bug reports, and ideas to improve the API or the auto-scaling behavior, are welcome.
 
-### code contributions
+### Code Contributions
 
 Bug fixes, and improvements to auto-scaling (implementation or tests), are welcome.
 
