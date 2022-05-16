@@ -132,7 +132,8 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 		defer cancel()
 		i := 0
 		for ; i < 100000; i++ {
-			if sleepCtx(ctx, inputPeriod) {
+			ctxCanceled := sleepCtx(ctx, inputPeriod)
+			if ctxCanceled {
 				break
 			}
 			logger.Printf("submitting job%d\n", i)
@@ -402,7 +403,8 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 				default:
 				}
 			} else {
-				if sleepCtx(ctx, inputPeriod) {
+				ctxCanceled := sleepCtx(ctx, inputPeriod)
+				if ctxCanceled {
 					break
 				}
 			}
