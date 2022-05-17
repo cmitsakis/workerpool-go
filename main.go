@@ -256,9 +256,9 @@ func (p *Pool[I, O, C]) loop() {
 				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
 				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
 				// reduce desired concurrency if it exceeds threshold
-				willExceedThreshold := concurrencyDesired - float64(concurrencyThreshold)
-				if willExceedThreshold > 0 {
-					concurrencyDesired = float64(concurrencyThreshold) + 0.3*willExceedThreshold
+				concurrencyExcess := concurrencyDesired - float64(concurrencyThreshold)
+				if concurrencyExcess > 0 {
+					concurrencyDesired = float64(concurrencyThreshold) + 0.3*concurrencyExcess
 				}
 				concurrencyDiffFloat := concurrencyDesired - float64(concurrency)
 				// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
