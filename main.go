@@ -276,7 +276,7 @@ func (p *Pool[I, O, C]) loop() {
 			if jobDone && // if a job was done in the previous iteration
 				concurrency > 0 &&
 				loadAvg/p.targetLoad < float64(concurrency-1)/float64(concurrency) && // and load is low
-				doneCounter-doneCounterWhenLastDisabledWorker > window2 { // and we haven't disable a worker recently
+				doneCounter-doneCounterWhenLastDisabledWorker > window2 { // and we haven't disabled a worker recently
 				// calculate desired concurrency
 				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
 				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
@@ -609,7 +609,7 @@ loop:
 			resultValue, err := w.pool.handler(j, w.id, *w.connection)
 			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
 			if err != nil && errorIsRetryable(err) && (j.Attempt < w.pool.retries || errorIsUnaccounted(err)) {
-				// if error is retryable, put it back in queue
+				// if error is retryable, put the job back in queue
 				if !errorIsUnaccounted(err) {
 					j.Attempt++
 				}
