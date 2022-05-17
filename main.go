@@ -164,7 +164,7 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	p.loopDone = make(chan struct{})
 	go p.loop()
 	for i := 0; i < p.maxActiveWorkers; i++ {
-		w := newWorker(&p, i, p.fixedWorkers)
+		w := newWorker(&p, i)
 		p.wgWorkers.Add(1)
 		go w.loop(ctxWorkers)
 	}
@@ -481,18 +481,16 @@ func ConnectPools[I, O, C, O2, C2 any](p1 *Pool[I, O, C], p2 *Pool[O, O2, C2], h
 }
 
 type worker[I, O, C any] struct {
-	id            int
-	pool          *Pool[I, O, C]
-	connection    *C
-	idleTicker    *time.Ticker
-	alwaysEnabled bool
+	id         int
+	pool       *Pool[I, O, C]
+	connection *C
+	idleTicker *time.Ticker
 }
 
-func newWorker[I, O, C any](p *Pool[I, O, C], id int, alwaysEnabled bool) *worker[I, O, C] {
+func newWorker[I, O, C any](p *Pool[I, O, C], id int) *worker[I, O, C] {
 	return &worker[I, O, C]{
-		id:            id,
-		pool:          p,
-		alwaysEnabled: alwaysEnabled,
+		id:   id,
+		pool: p,
 	}
 }
 
@@ -536,10 +534,10 @@ func (w *worker[I, O, C]) loop(ctx context.Context) {
 loop:
 	for {
 		if !enabled {
-			if !w.alwaysEnabled && w.idleTicker != nil {
+			if !w.pool.fixedWorkers && w.idleTicker != nil {
 				w.idleTicker.Stop()
 			}
-			if !w.alwaysEnabled {
+			if !w.pool.fixedWorkers {
 				select {
 				case _, ok := <-w.pool.enableWorker:
 					if !ok {
@@ -573,7 +571,7 @@ loop:
 			} else {
 				w.connection = new(C)
 			}
-			if !w.alwaysEnabled {
+			if !w.pool.fixedWorkers {
 				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
 			} else {
 				neverTickingTicker := time.Ticker{C: make(chan time.Time)}
@@ -597,7 +595,7 @@ loop:
 			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
 			resultValue, err := w.pool.handler(j, w.id, *w.connection)
 			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
-			if !w.alwaysEnabled {
+			if !w.pool.fixedWorkers {
 				w.idleTicker.Stop()
 			}
 			if err != nil && errorIsRetryable(err) && (j.Attempt < w.pool.retries || errorIsUnaccounted(err)) {
@@ -620,7 +618,7 @@ loop:
 					}
 				}
 			}
-			if !w.alwaysEnabled {
+			if !w.pool.fixedWorkers {
 				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
 			}
 		}
