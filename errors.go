@@ -121,7 +121,9 @@ func (err errorTypePauseWorker) PauseWorker() time.Duration {
 	return err.duration
 }
 
-// ErrorWrapPauseWorker pauses the worker for a duration of time.
+// ErrorWrapPauseWorker stops the worker for at least the given duration of time,
+// and starts another worker so concurrency will not decrease.
+// After the pause duration has passed, the worker can start again if it is needed.
 func ErrorWrapPauseWorker(dur time.Duration, err error) error {
 	if err == nil {
 		return nil
