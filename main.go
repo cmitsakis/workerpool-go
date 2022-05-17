@@ -179,6 +179,10 @@ type stats struct {
 	DoneCounter   int
 }
 
+// loop at each iteration:
+// - updates stats
+// - handles auto-scaling
+// - receives a submitted job payload from p.jobsNew OR receive a done job from p.jobsDone
 func (p *Pool[I, O, C]) loop() {
 	var loadAvg float64 = 1
 	var lenResultsAVG float64
@@ -213,6 +217,7 @@ func (p *Pool[I, O, C]) loop() {
 	doneCounterWhenLastDisabledWorker = -window2 / 2
 
 	for p.jobsNew != nil || p.jobsDone != nil {
+		// update stats
 		lenResultsAVG = a*float64(len(p.Results)) + (1-a)*lenResultsAVG
 		concurrency := atomic.LoadInt32(&p.concurrency)
 		if concurrency > 0 {
@@ -239,6 +244,8 @@ func (p *Pool[I, O, C]) loop() {
 				DoneCounter:   doneCounter,
 			})
 		}
+
+		// auto-scaling
 		if !p.fixedWorkers {
 			// if this is not a pool with fixed number of workers, run auto-scaling
 			if !jobDone && // if we received a new job in the previous iteration
@@ -309,14 +316,16 @@ func (p *Pool[I, O, C]) loop() {
 				p.enableWorkers(1)
 			}
 		}
+
 		jobDone = false
 		resultsBlocked = false
 		if nJobsInSystem >= p.maxActiveWorkers {
-			// if there are p.maxActiveWorkers jobs don't accept new jobs
-			// len(p.jobsQueue) = p.maxActiveWorkers
-			// that way we make sure nJobsInSystem < len(p.jobsQueue)
-			// so writes to p.jobsQueue don't block
-			// blocking writes to p.jobsQueue would cause deadlock
+			// If there are p.maxActiveWorkers jobs in the system, receive a done job from p.jobsDone, but don't accept new jobs.
+			// That way we make sure nJobsInSystem < p.maxActiveWorkers
+			// thus nJobsInSystem < cap(p.jobsQueue) (because cap(p.jobsQueue) = p.maxActiveWorkers)
+			// thus p.jobsQueue cannot exceed it's capacity,
+			// so writes to p.jobsQueue don't block.
+			// Blocking writes to p.jobsQueue would cause deadlock.
 			select {
 			case result, ok := <-p.jobsDone:
 				if !ok {
@@ -335,6 +344,7 @@ func (p *Pool[I, O, C]) loop() {
 				doneCounter++
 				jobDone = true
 			case _, ok := <-p.concurrencyIs0:
+				// if a worker signals that concurrency is 0, enable a worker to avoid deadlock
 				if !ok {
 					p.jobsNew = nil
 					continue
@@ -342,6 +352,7 @@ func (p *Pool[I, O, C]) loop() {
 				p.enableWorkers(1)
 			}
 		} else {
+			// receive a submitted job payload from p.jobsNew OR receive a done job from p.jobsDone
 			select {
 			case payload, ok := <-p.jobsNew:
 				if !ok {
@@ -368,6 +379,7 @@ func (p *Pool[I, O, C]) loop() {
 				doneCounter++
 				jobDone = true
 			case _, ok := <-p.concurrencyIs0:
+				// if a worker signals that concurrency is 0, enable a worker to avoid deadlock
 				if !ok {
 					p.jobsNew = nil
 					continue
