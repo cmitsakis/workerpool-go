@@ -285,21 +285,20 @@ func (p *Pool[I, O, C]) loop() {
 					doneCounterWhenLastDisabledWorker = doneCounter
 				}
 			}
-			if resultsBlocked {
-				if doneCounter-doneCounterWhenDisabledWorkerResultsBlocked > window2 {
-					concurrencyThreshold = concurrency
-					concurrencyDesired := 0.9 * float64(concurrency)
-					if concurrencyDesired <= 0 {
-						concurrencyDesired = 1
+			if resultsBlocked && // if write to p.Results channel blocked in the previous iteration
+				doneCounter-doneCounterWhenDisabledWorkerResultsBlocked > window2 { // and we haven't recently disabled a worker due to p.Results blocking
+				concurrencyThreshold = concurrency
+				concurrencyDesired := 0.9 * float64(concurrency)
+				if concurrencyDesired <= 0 {
+					concurrencyDesired = 1
+				}
+				concurrencyDiff := int(concurrencyDesired - float64(concurrency))
+				if concurrencyDiff < 0 {
+					if p.loggerDebug != nil {
+						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, -concurrencyDiff)
 					}
-					concurrencyDiff := int(concurrencyDesired - float64(concurrency))
-					if concurrencyDiff < 0 {
-						if p.loggerDebug != nil {
-							p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, -concurrencyDiff)
-						}
-						p.disableWorkers(-concurrencyDiff)
-						doneCounterWhenDisabledWorkerResultsBlocked = doneCounter
-					}
+					p.disableWorkers(-concurrencyDiff)
+					doneCounterWhenDisabledWorkerResultsBlocked = doneCounter
 				}
 			}
 			// make sure not all workers are disabled while there are jobs
