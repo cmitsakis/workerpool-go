@@ -264,7 +264,7 @@ func (p *Pool[I, O, C]) loop() {
 				// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
 				// in order to reduce concurrencyDiff if there is backpressure and len(p.Results) == 0 was temporary
 				concurrencyDiffFloat *= 1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers))
-				concurrencyDiff := int(concurrencyDiffFloat)
+				concurrencyDiff := int32(math.Round(concurrencyDiffFloat))
 				if concurrencyDiff > 0 {
 					if p.loggerDebug != nil {
 						p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] high load - enabling %d new workers", jobID, concurrencyDiff)
@@ -280,10 +280,10 @@ func (p *Pool[I, O, C]) loop() {
 				// calculate desired concurrency
 				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
 				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
-				if concurrencyDesired <= 0 {
+				if int(math.Round(concurrencyDesired)) <= 0 {
 					concurrencyDesired = 1
 				}
-				concurrencyDiff := int(concurrencyDesired - float64(concurrency))
+				concurrencyDiff := int32(math.Round(concurrencyDesired)) - concurrency
 				if concurrencyDiff < 0 {
 					if p.loggerDebug != nil {
 						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, -concurrencyDiff)
@@ -296,10 +296,10 @@ func (p *Pool[I, O, C]) loop() {
 				doneCounter-doneCounterWhenDisabledWorkerResultsBlocked > window2 { // and we haven't recently disabled a worker due to p.Results blocking
 				concurrencyThreshold = concurrency
 				concurrencyDesired := 0.9 * float64(concurrency)
-				if concurrencyDesired <= 0 {
+				if int(math.Round(concurrencyDesired)) <= 0 {
 					concurrencyDesired = 1
 				}
-				concurrencyDiff := int(concurrencyDesired - float64(concurrency))
+				concurrencyDiff := int32(math.Round(concurrencyDesired)) - concurrency
 				if concurrencyDiff < 0 {
 					if p.loggerDebug != nil {
 						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] write to p.Results blocked. try to disable %d workers\n", doneCounter, -concurrencyDiff)
@@ -395,7 +395,7 @@ func (p *Pool[I, O, C]) loop() {
 	p.loopDone <- struct{}{}
 }
 
-func (p *Pool[I, O, C]) disableWorkers(n int) {
+func (p *Pool[I, O, C]) disableWorkers(n int32) {
 	// drain p.enableWorker channel
 loop:
 	for {
@@ -406,7 +406,7 @@ loop:
 		}
 	}
 	// try to disable n workers
-	for i := 0; i < n; i++ {
+	for i := int32(0); i < n; i++ {
 		select {
 		case p.disableWorker <- struct{}{}:
 		default:
@@ -414,7 +414,7 @@ loop:
 	}
 }
 
-func (p *Pool[I, O, C]) enableWorkers(n int) {
+func (p *Pool[I, O, C]) enableWorkers(n int32) {
 	// drain p.disableWorker channel
 loop:
 	for {
@@ -425,7 +425,7 @@ loop:
 		}
 	}
 	// try to enable n workers
-	for i := 0; i < n; i++ {
+	for i := int32(0); i < n; i++ {
 		select {
 		case p.enableWorker <- struct{}{}:
 		default:
