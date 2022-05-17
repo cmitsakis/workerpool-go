@@ -1,3 +1,6 @@
+// Copyright (C) 2022 Charalampos Mitsakis (go.mitsakis.org/workerpool)
+// Licensed under the Apache License, Version 2.0
+
 package workerpool
 
 import (
