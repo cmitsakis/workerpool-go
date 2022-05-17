@@ -604,22 +604,27 @@ loop:
 			if !w.pool.fixedWorkers {
 				w.idleTicker.Stop()
 			}
+			// run job
 			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
 			resultValue, err := w.pool.handler(j, w.id, *w.connection)
 			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
 			if err != nil && errorIsRetryable(err) && (j.Attempt < w.pool.retries || errorIsUnaccounted(err)) {
+				// if error is retryable, put it back in queue
 				if !errorIsUnaccounted(err) {
 					j.Attempt++
 				}
 				w.pool.jobsQueue <- j
 			} else {
+				// else job is done
 				w.pool.jobsDone <- Result[I, O]{Job: j, Value: resultValue, Error: err}
 				w.pool.wgJobs.Done()
 			}
+			// check if worker has to pause due to the error
 			if err != nil {
 				pauseDuration := errorPausesWorker(err)
 				if pauseDuration > 0 {
 					deinit()
+					// enable another worker so concurrency does not decrease
 					w.pool.enableWorkers(1)
 					ctxCanceled := sleepCtx(ctx, pauseDuration)
 					if ctxCanceled {
