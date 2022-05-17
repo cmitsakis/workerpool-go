@@ -601,12 +601,12 @@ loop:
 			if !ok {
 				break loop
 			}
-			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
-			resultValue, err := w.pool.handler(j, w.id, *w.connection)
-			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
 			if !w.pool.fixedWorkers {
 				w.idleTicker.Stop()
 			}
+			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
+			resultValue, err := w.pool.handler(j, w.id, *w.connection)
+			atomic.AddInt32(&w.pool.nJobsProcessing, -1)
 			if err != nil && errorIsRetryable(err) && (j.Attempt < w.pool.retries || errorIsUnaccounted(err)) {
 				if !errorIsUnaccounted(err) {
 					j.Attempt++
