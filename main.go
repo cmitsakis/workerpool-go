@@ -550,9 +550,7 @@ loop:
 			enabled = true
 			atomic.AddInt32(&w.pool.concurrency, 1)
 			if w.pool.loggerDebug != nil {
-				if w.pool.loggerDebug != nil {
-					w.pool.loggerDebug.Printf("[workerpool/worker%d] worker enabled\n", w.id)
-				}
+				w.pool.loggerDebug.Printf("[workerpool/worker%d] worker enabled\n", w.id)
 			}
 			if w.pool.workerInit != nil {
 				connection, err := w.pool.workerInit(w.id)
