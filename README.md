@@ -16,7 +16,7 @@ If the queue is full, job submissions block until they can be put in queue.
 
 **auto-scaling:**
 If too many jobs are in queue, new workers are started (if available).
-If there are more active workers than needed some workers are stopped.
+If there are more active workers than needed, some workers (and their respective goroutines) are stopped.
 You can disable auto-scaling for CPU intensive tasks.
 
 **steady-state behavior:**

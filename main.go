@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,12 +55,13 @@ type Pool[I, O, C any] struct {
 	// If the pool is created by the constructors
 	// NewPoolSimple() or NewPoolWithInit(),
 	// this channel is nil.
-	Results       chan Result[I, O]
-	enableWorker  chan struct{}
-	disableWorker chan struct{}
-	monitor       func(s stats)
-	cancelWorkers context.CancelFunc
-	loopDone      chan struct{}
+	Results          chan Result[I, O]
+	disableWorker    chan struct{}
+	monitor          func(s stats)
+	cancelWorkers    context.CancelFunc
+	loopDone         chan struct{}
+	stoppedWorkers   map[int]*worker[I, O, C]
+	stoppedWorkersMu sync.Mutex
 }
 
 // NewPoolSimple creates a new worker pool.
@@ -159,15 +161,14 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 		p.Results = make(chan Result[I, O], p.maxActiveWorkers)
 	}
 	p.concurrencyIs0 = make(chan struct{}, 1)
-	p.enableWorker = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{}, p.maxActiveWorkers)
+	p.stoppedWorkers = make(map[int]*worker[I, O, C], p.maxActiveWorkers)
 	p.loopDone = make(chan struct{})
-	go p.loop()
 	for i := 0; i < p.maxActiveWorkers; i++ {
-		w := newWorker(&p, i)
-		p.wgWorkers.Add(1)
-		go w.loop(ctxWorkers)
+		w := newWorker(&p, i, ctxWorkers)
+		p.stoppedWorkers[i] = w
 	}
+	go p.loop()
 	return &p, nil
 }
 
@@ -245,8 +246,16 @@ func (p *Pool[I, O, C]) loop() {
 			})
 		}
 
-		// auto-scaling
-		if !p.fixedWorkers {
+		if p.fixedWorkers {
+			concurrencyDesired := p.maxActiveWorkers
+			concurrencyDiff := int32(concurrencyDesired) - concurrency
+			if concurrencyDiff > 0 {
+				if p.loggerDebug != nil {
+					p.loggerDebug.Printf("[workerpool/loop] [jobID=%d] enabling %d new workers", jobID, concurrencyDiff)
+				}
+				p.enableWorkers(concurrencyDiff)
+			}
+		} else {
 			// if this is not a pool with fixed number of workers, run auto-scaling
 			if !jobDone && // if we received a new job in the previous iteration
 				loadAvg/p.targetLoad > float64(concurrency+1)/float64(concurrency) && // and load is high
@@ -396,15 +405,6 @@ func (p *Pool[I, O, C]) loop() {
 }
 
 func (p *Pool[I, O, C]) disableWorkers(n int32) {
-	// drain p.enableWorker channel
-loop:
-	for {
-		select {
-		case <-p.enableWorker:
-		default:
-			break loop
-		}
-	}
 	// try to disable n workers
 	for i := int32(0); i < n; i++ {
 		select {
@@ -424,12 +424,46 @@ loop:
 			break loop
 		}
 	}
-	// try to enable n workers
-	for i := int32(0); i < n; i++ {
-		select {
-		case p.enableWorker <- struct{}{}:
-		default:
+
+	p.stoppedWorkersMu.Lock()
+	defer p.stoppedWorkersMu.Unlock()
+
+	if len(p.stoppedWorkers) == 0 {
+		return
+	}
+
+	// copy keys (worker IDs) of map p.stoppedWorkers to slice stoppedWorkerIDs,
+	// so we can then choose random worker IDs
+	var stoppedWorkerIDs []int
+	for workerID := range p.stoppedWorkers {
+		stoppedWorkerIDs = append(stoppedWorkerIDs, workerID)
+	}
+
+	// choose n random worker IDs to start
+	workerIDsToStart := make([]int, 0, n)
+	if n == 1 {
+		randomWorkerID := stoppedWorkerIDs[rand.Intn(len(stoppedWorkerIDs))]
+		workerIDsToStart = append(workerIDsToStart, randomWorkerID)
+	} else {
+		for i, randomI := range rand.Perm(len(stoppedWorkerIDs)) {
+			if int32(i) >= n {
+				break
+			}
+			randomWorkerID := stoppedWorkerIDs[randomI]
+			workerIDsToStart = append(workerIDsToStart, randomWorkerID)
 		}
+	}
+
+	// start workers
+	p.wgWorkers.Add(len(workerIDsToStart))
+	for _, workerIDToStart := range workerIDsToStart {
+		workerToStart, exists := p.stoppedWorkers[workerIDToStart]
+		if !exists {
+			// unreachable
+			panic(fmt.Sprintf("invalid workerIDToStart: %d", workerIDToStart))
+		}
+		delete(p.stoppedWorkers, workerIDToStart)
+		go workerToStart.loop()
 	}
 }
 
@@ -455,7 +489,6 @@ func (p *Pool[I, O, C]) StopAndWait() {
 	}
 	p.wgWorkers.Wait()
 	<-p.loopDone
-	close(p.enableWorker)
 	close(p.disableWorker)
 	close(p.concurrencyIs0)
 	if p.loggerDebug != nil {
@@ -464,6 +497,9 @@ func (p *Pool[I, O, C]) StopAndWait() {
 	if p.Results != nil {
 		close(p.Results)
 	}
+	p.stoppedWorkersMu.Lock()
+	defer p.stoppedWorkersMu.Unlock()
+	p.stoppedWorkers = nil
 }
 
 // ConnectPools starts a goroutine that reads the results of the first pool,
@@ -494,18 +530,20 @@ func ConnectPools[I, O, C, O2, C2 any](p1 *Pool[I, O, C], p2 *Pool[O, O2, C2], h
 type worker[I, O, C any] struct {
 	id         int
 	pool       *Pool[I, O, C]
+	ctx        context.Context
 	connection *C
 	idleTicker *time.Ticker
 }
 
-func newWorker[I, O, C any](p *Pool[I, O, C], id int) *worker[I, O, C] {
+func newWorker[I, O, C any](p *Pool[I, O, C], id int, ctx context.Context) *worker[I, O, C] {
 	return &worker[I, O, C]{
 		id:   id,
 		pool: p,
+		ctx:  ctx,
 	}
 }
 
-func (w *worker[I, O, C]) loop(ctx context.Context) {
+func (w *worker[I, O, C]) loop() {
 	enabled := false
 	deinit := func() {
 		if w.idleTicker != nil {
@@ -540,66 +578,74 @@ func (w *worker[I, O, C]) loop(ctx context.Context) {
 			}
 		}
 	}
-	defer w.pool.wgWorkers.Done()
-	defer deinit()
-loop:
-	for {
-		if !enabled {
-			if !w.pool.fixedWorkers && w.idleTicker != nil {
-				w.idleTicker.Stop()
-			}
-			if !w.pool.fixedWorkers {
-				select {
-				case _, ok := <-w.pool.enableWorker:
-					if !ok {
-						break loop
-					}
-				case <-ctx.Done():
-					break loop
-				}
-			}
-			enabled = true
-			atomic.AddInt32(&w.pool.concurrency, 1)
-			if w.pool.loggerDebug != nil {
-				w.pool.loggerDebug.Printf("[workerpool/worker%d] worker enabled\n", w.id)
-			}
-			if w.pool.workerInit != nil {
-				connection, err := w.pool.workerInit(w.id)
-				if err != nil {
-					if w.pool.loggerInfo != nil {
-						w.pool.loggerInfo.Printf("[workerpool/worker%d] workerInit failed: %s\n", w.id, err)
-					}
-					enabled = false
-					atomic.AddInt32(&w.pool.concurrency, -1)
-					time.Sleep(w.pool.reinitDelay)
-					// this worker failed to start, so enable another worker
-					w.pool.enableWorkers(1)
-					continue
-				}
-				w.connection = &connection
-			} else {
-				w.connection = new(C)
-			}
-			if !w.pool.fixedWorkers {
-				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
-			} else {
-				neverTickingTicker := time.Ticker{C: make(chan time.Time)}
-				w.idleTicker = &neverTickingTicker
-			}
+	defer func() {
+		if w.pool.loggerDebug != nil {
+			w.pool.loggerDebug.Printf("[workerpool/worker%d] stopped\n", w.id)
 		}
+
+		deinit()
+
+		// save this worker to w.pool.stoppedWorkers
+		w.pool.stoppedWorkersMu.Lock()
+		defer w.pool.stoppedWorkersMu.Unlock()
+		if w.pool.stoppedWorkers != nil { // might have been set to nil by pool.StopAndWait()
+			w.pool.stoppedWorkers[w.id] = w
+		}
+
+		w.pool.wgWorkers.Done()
+	}()
+
+	select {
+	case <-w.ctx.Done():
+		if w.pool.loggerDebug != nil {
+			w.pool.loggerDebug.Printf("ctx has been cancelled. worker cannot start")
+		}
+		return
+	default:
+	}
+	enabled = true
+	atomic.AddInt32(&w.pool.concurrency, 1)
+	if w.pool.loggerDebug != nil {
+		w.pool.loggerDebug.Printf("[workerpool/worker%d] worker enabled\n", w.id)
+	}
+	if w.pool.workerInit != nil {
+		connection, err := w.pool.workerInit(w.id)
+		if err != nil {
+			if w.pool.loggerInfo != nil {
+				w.pool.loggerInfo.Printf("[workerpool/worker%d] workerInit failed: %s\n", w.id, err)
+			}
+			enabled = false
+			atomic.AddInt32(&w.pool.concurrency, -1)
+			time.Sleep(w.pool.reinitDelay)
+			// this worker failed to start, so enable another worker
+			w.pool.enableWorkers(1)
+			return
+		}
+		w.connection = &connection
+	} else {
+		w.connection = new(C)
+	}
+	if !w.pool.fixedWorkers {
+		w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+	} else {
+		neverTickingTicker := time.Ticker{C: make(chan time.Time)}
+		w.idleTicker = &neverTickingTicker
+	}
+
+	for {
 		select {
 		case <-w.idleTicker.C:
-			deinit()
-		case <-ctx.Done():
-			break loop
+			return
+		case <-w.ctx.Done():
+			return
 		case _, ok := <-w.pool.disableWorker:
 			if !ok {
-				break loop
+				return
 			}
-			deinit()
+			return
 		case j, ok := <-w.pool.jobsQueue:
 			if !ok {
-				break loop
+				return
 			}
 			if !w.pool.fixedWorkers {
 				w.idleTicker.Stop()
@@ -626,19 +672,14 @@ loop:
 					deinit()
 					// enable another worker so concurrency does not decrease
 					w.pool.enableWorkers(1)
-					ctxCanceled := sleepCtx(ctx, pauseDuration)
-					if ctxCanceled {
-						break loop
-					}
+					sleepCtx(w.ctx, pauseDuration)
+					return
 				}
 			}
 			if !w.pool.fixedWorkers {
 				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
 			}
 		}
-	}
-	if w.pool.loggerDebug != nil {
-		w.pool.loggerDebug.Printf("[workerpool/worker%d] finished\n", w.id)
 	}
 }
 
