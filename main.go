@@ -270,9 +270,11 @@ func (p *Pool[I, O, C]) loop() {
 					concurrencyDesired = float64(concurrencyThreshold) + 0.3*concurrencyExcess
 				}
 				concurrencyDiffFloat := concurrencyDesired - float64(concurrency)
-				// then we multiply by 1-sqrt(lenResultsAVG/p.maxActiveWorkers) (found experimentally. needs improvement)
-				// in order to reduce concurrencyDiff if there is backpressure and len(p.Results) == 0 was temporary
-				concurrencyDiffFloat *= 1 - math.Sqrt(lenResultsAVG/float64(p.maxActiveWorkers))
+				if p.Results != nil {
+					// then we multiply by 1-sqrt(lenResultsAVG/cap(p.Results)) (found experimentally. needs improvement)
+					// in order to reduce concurrencyDiff if there is backpressure and len(p.Results) == 0 was temporary
+					concurrencyDiffFloat *= 1 - math.Sqrt(lenResultsAVG/float64(cap(p.Results)))
+				}
 				concurrencyDiff := int32(math.Round(concurrencyDiffFloat))
 				if concurrencyDiff > 0 {
 					if p.loggerDebug != nil {
