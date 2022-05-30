@@ -10,20 +10,22 @@ import (
 )
 
 type poolConfig struct {
-	setOptions   map[int]struct{}
-	fixedWorkers bool
-	retries      int
-	reinitDelay  time.Duration
-	idleTimeout  time.Duration
-	targetLoad   float64
-	name         string
-	loggerInfo   *log.Logger
-	loggerDebug  *log.Logger
-	monitor      func(s stats)
+	setOptions       map[int]struct{}
+	fixedWorkers     bool
+	maxActiveWorkers int
+	retries          int
+	reinitDelay      time.Duration
+	idleTimeout      time.Duration
+	targetLoad       float64
+	name             string
+	loggerInfo       *log.Logger
+	loggerDebug      *log.Logger
+	monitor          func(s stats)
 }
 
 const (
 	optionFixedWorkers = iota
+	optionMaxActiveWorkers
 	optionRetries
 	optionReinitDelay
 	optionIdleTimeout
@@ -38,6 +40,17 @@ func FixedWorkers() func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.fixedWorkers = true
 		c.setOptions[optionFixedWorkers] = struct{}{}
+		return nil
+	}
+}
+
+// MaxActiveWorkers sets the maximum number of active workers, if you need it to be lower than numOfWorkers.
+//
+// Default value = numOfWorkers
+func MaxActiveWorkers(n int) func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		c.maxActiveWorkers = n
+		c.setOptions[optionMaxActiveWorkers] = struct{}{}
 		return nil
 	}
 }

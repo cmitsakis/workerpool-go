@@ -85,8 +85,10 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 		logger = log.New(io.Discard, "", 0)
 	}
 	rand.Seed(time.Now().UnixNano())
+	const numOfWorkers = 1000
+	const maxActiveWorkers = 100
 	workerProfiles := make([]string, 0)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < numOfWorkers; i++ {
 		workerProfiles = append(workerProfiles, fmt.Sprintf("w%d", i))
 	}
 	const inputPeriod = 10 * time.Millisecond
@@ -117,8 +119,11 @@ func TestPoolAutoscalingBehavior(t *testing.T) {
 		}
 		logger.Printf("[worker%v] disconnecting\n", workerID)
 		return nil
-	}, LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
+	}, MaxActiveWorkers(maxActiveWorkers), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
 		pStats = append(pStats, s)
+		if s.Concurrency > maxActiveWorkers {
+			t.Errorf("[ERROR] concurrency (%v) > maxActiveWorkers (%v)", s.Concurrency, maxActiveWorkers)
+		}
 	}))
 	if err != nil {
 		t.Errorf("[ERROR] failed to create pool: %s", err)
@@ -282,11 +287,11 @@ func TestPipelineCorrectness(t *testing.T) {
 // Use: 'go test -timeout 30m -v' to make sure all tests run, and be able to read all the stats.
 // Alternatively use: 'go test -short -v' to run a small number of test cases.
 func TestPipelineAutoscalingBehavior(t *testing.T) {
-	var numOfWorkersSlice []int
+	var maxActiveWorkersSlice []int
 	if testing.Short() == true {
-		numOfWorkersSlice = []int{10, 100}
+		maxActiveWorkersSlice = []int{10, 100}
 	} else {
-		numOfWorkersSlice = []int{5, 10, 20, 50, 100, 200, 500}
+		maxActiveWorkersSlice = []int{5, 10, 20, 50, 100, 200, 500}
 	}
 	var inputPeriodSlice []time.Duration
 	if testing.Short() == true {
@@ -300,7 +305,7 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 	var workersNumRSDSum float64
 	var throughputPerActivationFractionSum float64
 	var numOfTests int
-	for _, w := range numOfWorkersSlice {
+	for _, w := range maxActiveWorkersSlice {
 		for _, p := range inputPeriodSlice {
 			t.Run(fmt.Sprintf("w=%v_p=%v", w, p), func(t *testing.T) {
 				numOfTests++
@@ -329,7 +334,7 @@ func TestPipelineAutoscalingBehavior(t *testing.T) {
 	t.Logf("[INFO] throughputPerActivationFraction average: %v", throughputPerActivationFractionAVG)
 }
 
-func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPeriod time.Duration) (int, float64, float64, float64, float64) {
+func testPipelineAutoscalingBehaviorCase(t *testing.T, maxActiveWorkers int, inputPeriod time.Duration) (int, float64, float64, float64, float64) {
 	var logger *log.Logger
 	if *flagDebugLogs {
 		logger = log.New(os.Stdout, "[DEBUG] [test] ", log.LstdFlags|log.Lmsgprefix)
@@ -337,20 +342,23 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		logger = log.New(io.Discard, "", 0)
 	}
 
-	jobDur1 := 3333 * time.Duration(numOfWorkers) * time.Microsecond
-	jobDur2 := 6666 * time.Duration(numOfWorkers) * time.Microsecond
-	jobDur3 := 10000 * time.Duration(numOfWorkers) * time.Microsecond
+	jobDur1 := 3333 * time.Duration(maxActiveWorkers) * time.Microsecond
+	jobDur2 := 6666 * time.Duration(maxActiveWorkers) * time.Microsecond
+	jobDur3 := 10000 * time.Duration(maxActiveWorkers) * time.Microsecond
 
 	var p1Stats []stats
 	var p2Stats []stats
 	var p3Stats []stats
 
 	// stage 1: calculate square root
-	p1, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (float64, error) {
+	p1, err := NewPoolWithResults(10*maxActiveWorkers, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur1)
 		return math.Sqrt(job.Payload), nil
-	}, Name("p1"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
+	}, Name("p1"), MaxActiveWorkers(maxActiveWorkers), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
 		p1Stats = append(p1Stats, s)
+		if s.Concurrency > int32(maxActiveWorkers) {
+			t.Errorf("[ERROR] concurrency (%v) > maxActiveWorkers (%v)", s.Concurrency, maxActiveWorkers)
+		}
 	}))
 	if err != nil {
 		t.Errorf("[ERROR] failed to create pool p1: %s", err)
@@ -358,7 +366,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 	}
 
 	// stage 2: negate number
-	p2, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (float64, error) {
+	p2, err := NewPoolWithResults(maxActiveWorkers, func(job Job[float64], workerID int) (float64, error) {
 		time.Sleep(jobDur2)
 		return -job.Payload, nil
 	}, Name("p2"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
@@ -370,7 +378,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 	}
 
 	// stage 3: convert float to string
-	p3, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (string, error) {
+	p3, err := NewPoolWithResults(maxActiveWorkers, func(job Job[float64], workerID int) (string, error) {
 		time.Sleep(jobDur3)
 		return fmt.Sprintf("%.3f", job.Payload), nil
 	}, Name("p3"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()), monitor(func(s stats) {
@@ -483,11 +491,11 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 	var p3WorkersExpected float64
 	if inputPeriod > 0 {
 		p3WorkersExpected = float64(jobDur3 / inputPeriod)
-		if p3WorkersExpected > float64(numOfWorkers) {
-			p3WorkersExpected = float64(numOfWorkers)
+		if p3WorkersExpected > float64(maxActiveWorkers) {
+			p3WorkersExpected = float64(maxActiveWorkers)
 		}
 	} else {
-		p3WorkersExpected = float64(numOfWorkers)
+		p3WorkersExpected = float64(maxActiveWorkers)
 	}
 	if p3WorkersAVG < 0.9*p3WorkersExpected-1 {
 		t.Errorf("[WARNING] p3WorkersAVG < %v", 0.9*p3WorkersExpected-1)
@@ -511,7 +519,7 @@ func testPipelineAutoscalingBehaviorCase(t *testing.T, numOfWorkers int, inputPe
 		math.Abs(p2WorkersAVG-p2WorkersExpected)/p2WorkersExpected +
 		math.Abs(p3WorkersAVG-p3WorkersExpected)/p3WorkersExpected
 	workersNumRSD := p1WorkersSD/p1WorkersAVG + p2WorkersSD/p2WorkersAVG + p3WorkersSD/p3WorkersAVG
-	activationFraction := (p1WorkersAVG + p2WorkersAVG + p3WorkersAVG) / float64(3*numOfWorkers)
+	activationFraction := (p1WorkersAVG + p2WorkersAVG + p3WorkersAVG) / float64(3*maxActiveWorkers)
 	t.Logf("[INFO] workersNumError: %v", workersNumError)
 	t.Logf("[INFO] workersNumRSD: %v", workersNumRSD)
 	t.Logf("[INFO] throughput: %v", throughput)

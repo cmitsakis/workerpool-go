@@ -49,24 +49,24 @@ That's why there are four constructors of increasing complexity:
 
 ```go
 NewPoolSimple(
-	maxActiveWorkers int,
+	numOfWorkers int,
 	handler func(job Job[I], workerID int) error,
 	...)
 
 NewPoolWithInit(
-	maxActiveWorkers int,
+	numOfWorkers int,
 	handler func(job Job[I], workerID int, connection C) error,
 	workerInit func(workerID int) (C, error),
 	workerDeinit func(workerID int, connection C) error,
 	...)
 
 NewPoolWithResults(
-	maxActiveWorkers int,
+	numOfWorkers int,
 	handler func(job Job[I], workerID int) (O, error),
 	...)
 
 NewPoolWithResultsAndInit(
-	maxActiveWorkers int,
+	numOfWorkers int,
 	handler func(job Job[I], workerID int, connection C) (O, error),
 	workerInit func(workerID int) (C, error),
 	workerDeinit func(workerID int, connection C) error,

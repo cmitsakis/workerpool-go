@@ -28,6 +28,7 @@ type Result[I, O any] struct {
 }
 
 type Pool[I, O, C any] struct {
+	numOfWorkers     int
 	maxActiveWorkers int
 	fixedWorkers     bool
 	retries          int
@@ -65,44 +66,45 @@ type Pool[I, O, C any] struct {
 }
 
 // NewPoolSimple creates a new worker pool.
-func NewPoolSimple[I any](maxActiveWorkers int, handler func(job Job[I], workerID int) error, options ...func(*poolConfig) error) (*Pool[I, struct{}, struct{}], error) {
+func NewPoolSimple[I any](numOfWorkers int, handler func(job Job[I], workerID int) error, options ...func(*poolConfig) error) (*Pool[I, struct{}, struct{}], error) {
 	handler2 := func(job Job[I], workerID int, connection struct{}) error {
 		return handler(job, workerID)
 	}
-	return NewPoolWithInit[I, struct{}](maxActiveWorkers, handler2, nil, nil, options...)
+	return NewPoolWithInit[I, struct{}](numOfWorkers, handler2, nil, nil, options...)
 }
 
 // NewPoolWithInit creates a new worker pool with workerInit() and workerDeinit() functions.
-func NewPoolWithInit[I, C any](maxActiveWorkers int, handler func(job Job[I], workerID int, connection C) error, workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[I, struct{}, C], error) {
+func NewPoolWithInit[I, C any](numOfWorkers int, handler func(job Job[I], workerID int, connection C) error, workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[I, struct{}, C], error) {
 	handler2 := func(job Job[I], workerID int, connection C) (struct{}, error) {
 		return struct{}{}, handler(job, workerID, connection)
 	}
-	return newPool[I, struct{}, C](maxActiveWorkers, handler2, workerInit, workerDeinit, false, options...)
+	return newPool[I, struct{}, C](numOfWorkers, handler2, workerInit, workerDeinit, false, options...)
 }
 
 // NewPoolWithResults creates a new worker pool with Results channel.
 // You must consume from this channel in a loop until it is closed.
-func NewPoolWithResults[I, O any](maxActiveWorkers int, handler func(job Job[I], workerID int) (O, error), options ...func(*poolConfig) error) (*Pool[I, O, struct{}], error) {
+func NewPoolWithResults[I, O any](numOfWorkers int, handler func(job Job[I], workerID int) (O, error), options ...func(*poolConfig) error) (*Pool[I, O, struct{}], error) {
 	handler2 := func(job Job[I], workerID int, connection struct{}) (O, error) {
 		return handler(job, workerID)
 	}
-	return newPool[I, O, struct{}](maxActiveWorkers, handler2, nil, nil, true, options...)
+	return newPool[I, O, struct{}](numOfWorkers, handler2, nil, nil, true, options...)
 }
 
 // NewPoolWithResultsAndInit creates a new worker pool with workerInit() and workerDeinit() functions and Results channel.
 // You must consume from this channel in a loop until it is closed.
-func NewPoolWithResultsAndInit[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerID int, connection C) (O, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[I, O, C], error) {
-	return newPool[I, O, C](maxActiveWorkers, handler, workerInit, workerDeinit, true, options...)
+func NewPoolWithResultsAndInit[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID int, connection C) (O, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, options ...func(*poolConfig) error) (*Pool[I, O, C], error) {
+	return newPool[I, O, C](numOfWorkers, handler, workerInit, workerDeinit, true, options...)
 }
 
-func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerID int, connection C) (O, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, createResultsChannel bool, options ...func(*poolConfig) error) (*Pool[I, O, C], error) {
+func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID int, connection C) (O, error), workerInit func(workerID int) (C, error), workerDeinit func(workerID int, connection C) error, createResultsChannel bool, options ...func(*poolConfig) error) (*Pool[I, O, C], error) {
 	// default configuration
 	config := poolConfig{
-		setOptions:  make(map[int]struct{}),
-		retries:     1,
-		reinitDelay: time.Second,
-		idleTimeout: 20 * time.Second,
-		targetLoad:  0.9,
+		setOptions:       make(map[int]struct{}),
+		maxActiveWorkers: numOfWorkers,
+		retries:          1,
+		reinitDelay:      time.Second,
+		idleTimeout:      20 * time.Second,
+		targetLoad:       0.9,
 	}
 	for _, option := range options {
 		err := option(&config)
@@ -144,15 +146,22 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 		loggerInfo:       loggerInfo,
 		loggerDebug:      loggerDebug,
 		monitor:          config.monitor,
-		maxActiveWorkers: maxActiveWorkers,
+		numOfWorkers:     numOfWorkers,
+		maxActiveWorkers: config.maxActiveWorkers,
 		fixedWorkers:     config.fixedWorkers,
 		handler:          handler,
 		workerInit:       workerInit,
 		workerDeinit:     workerDeinit,
 		cancelWorkers:    cancelWorkers,
 	}
+	if p.numOfWorkers <= 0 {
+		return nil, fmt.Errorf("numOfWorkers <= 0")
+	}
 	if p.maxActiveWorkers <= 0 {
 		return nil, fmt.Errorf("maxActiveWorkers <= 0")
+	}
+	if p.maxActiveWorkers > p.numOfWorkers {
+		return nil, fmt.Errorf("maxActiveWorkers > numOfWorkers")
 	}
 	p.jobsNew = make(chan I, 2)
 	p.jobsQueue = make(chan Job[I], p.maxActiveWorkers) // size p.maxActiveWorkers in order to avoid deadlock
@@ -162,9 +171,9 @@ func newPool[I, O, C any](maxActiveWorkers int, handler func(job Job[I], workerI
 	}
 	p.concurrencyIs0 = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{}, p.maxActiveWorkers)
-	p.stoppedWorkers = make(map[int]*worker[I, O, C], p.maxActiveWorkers)
+	p.stoppedWorkers = make(map[int]*worker[I, O, C], p.numOfWorkers)
 	p.loopDone = make(chan struct{})
-	for i := 0; i < p.maxActiveWorkers; i++ {
+	for i := 0; i < p.numOfWorkers; i++ {
 		w := newWorker(&p, i, ctxWorkers)
 		p.stoppedWorkers[i] = w
 	}
@@ -431,6 +440,15 @@ loop:
 	defer p.stoppedWorkersMu.Unlock()
 
 	if len(p.stoppedWorkers) == 0 {
+		return
+	}
+
+	concurrency := p.numOfWorkers - len(p.stoppedWorkers)
+	if concurrency+int(n) > p.maxActiveWorkers {
+		n = int32(p.maxActiveWorkers - concurrency)
+	}
+
+	if n <= 0 {
 		return
 	}
 
