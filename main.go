@@ -190,7 +190,7 @@ func (p *Pool[I, O, C]) loop() {
 	var jobID int
 	var jobIDWhenLastEnabledWorker int
 	var doneCounter int
-	var doneCounterWhenLastDisabledWorker int
+	var doneCounterWhenDisabledWorker int
 	var doneCounterWhenDisabledWorkerResultsBlocked int
 	var nJobsInSystem int
 	var jobDone bool
@@ -215,7 +215,7 @@ func (p *Pool[I, O, C]) loop() {
 
 	// initialize with negative value so we don't wait 'window2' submissions for auto-scaling to run for the 1st time
 	jobIDWhenLastEnabledWorker = -window2 / 2
-	doneCounterWhenLastDisabledWorker = -window2 / 2
+	doneCounterWhenDisabledWorker = -window2 / 2
 
 	for p.jobsNew != nil || p.jobsDone != nil {
 		// update stats
@@ -285,7 +285,7 @@ func (p *Pool[I, O, C]) loop() {
 			if jobDone && // if a job was done in the previous iteration
 				concurrency > 0 &&
 				loadAvg/p.targetLoad < float64(concurrency-1)/float64(concurrency) && // and load is low
-				doneCounter-doneCounterWhenLastDisabledWorker > window2 { // and we haven't disabled a worker recently
+				doneCounter-doneCounterWhenDisabledWorker > window2 { // and we haven't disabled a worker recently
 				// calculate desired concurrency
 				// concurrencyDesired/concurrency = loadAvg/p.targetLoad
 				concurrencyDesired := float64(concurrency) * loadAvg / p.targetLoad
@@ -298,7 +298,7 @@ func (p *Pool[I, O, C]) loop() {
 						p.loggerDebug.Printf("[workerpool/loop] [doneCounter=%d] low load - disabling %v workers", doneCounter, -concurrencyDiff)
 					}
 					p.disableWorkers(-concurrencyDiff)
-					doneCounterWhenLastDisabledWorker = doneCounter
+					doneCounterWhenDisabledWorker = doneCounter
 				}
 			}
 			if resultsBlocked && // if write to p.Results channel blocked in the previous iteration
