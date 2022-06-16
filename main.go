@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,7 +60,7 @@ type Pool[I, O, C any] struct {
 	monitor          func(s stats)
 	cancelWorkers    context.CancelFunc
 	loopDone         chan struct{}
-	stoppedWorkers   map[int]*worker[I, O, C]
+	stoppedWorkers   ring[*worker[I, O, C]]
 	stoppedWorkersMu sync.Mutex
 }
 
@@ -171,12 +170,13 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 	}
 	p.concurrencyIs0 = make(chan struct{}, 1)
 	p.disableWorker = make(chan struct{}, p.maxActiveWorkers)
-	p.stoppedWorkers = make(map[int]*worker[I, O, C], p.numOfWorkers)
+	p.stoppedWorkers = newRing[*worker[I, O, C]](p.numOfWorkers)
 	p.loopDone = make(chan struct{})
 	for i := 0; i < p.numOfWorkers; i++ {
 		w := newWorker(&p, i, ctxWorkers)
-		p.stoppedWorkers[i] = w
+		ringPush(&p.stoppedWorkers, w)
 	}
+	p.stoppedWorkers.Shuffle()
 	go p.loop()
 	return &p, nil
 }
@@ -439,11 +439,11 @@ loop:
 	p.stoppedWorkersMu.Lock()
 	defer p.stoppedWorkersMu.Unlock()
 
-	if len(p.stoppedWorkers) == 0 {
+	if p.stoppedWorkers.Count == 0 {
 		return
 	}
 
-	concurrency := p.numOfWorkers - len(p.stoppedWorkers)
+	concurrency := p.numOfWorkers - p.stoppedWorkers.Count
 	if concurrency+int(n) > p.maxActiveWorkers {
 		n = int32(p.maxActiveWorkers - concurrency)
 	}
@@ -452,37 +452,16 @@ loop:
 		return
 	}
 
-	// copy keys (worker IDs) of map p.stoppedWorkers to slice stoppedWorkerIDs,
-	// so we can then choose random worker IDs
-	var stoppedWorkerIDs []int
-	for workerID := range p.stoppedWorkers {
-		stoppedWorkerIDs = append(stoppedWorkerIDs, workerID)
-	}
-
-	// choose n random worker IDs to start
-	workerIDsToStart := make([]int, 0, n)
-	if n == 1 {
-		randomWorkerID := stoppedWorkerIDs[rand.Intn(len(stoppedWorkerIDs))]
-		workerIDsToStart = append(workerIDsToStart, randomWorkerID)
-	} else {
-		for i, randomI := range rand.Perm(len(stoppedWorkerIDs)) {
-			if int32(i) >= n {
-				break
-			}
-			randomWorkerID := stoppedWorkerIDs[randomI]
-			workerIDsToStart = append(workerIDsToStart, randomWorkerID)
+	workersToStart := make([]*worker[I, O, C], 0, int(n))
+	for i := 0; i < int(n); i++ {
+		w, ok := ringPop(&p.stoppedWorkers)
+		if !ok {
+			break
 		}
+		workersToStart = append(workersToStart, w)
 	}
-
-	// start workers
-	p.wgWorkers.Add(len(workerIDsToStart))
-	for _, workerIDToStart := range workerIDsToStart {
-		workerToStart, exists := p.stoppedWorkers[workerIDToStart]
-		if !exists {
-			// unreachable
-			panic(fmt.Sprintf("invalid workerIDToStart: %d", workerIDToStart))
-		}
-		delete(p.stoppedWorkers, workerIDToStart)
+	p.wgWorkers.Add(len(workersToStart))
+	for _, workerToStart := range workersToStart {
 		go workerToStart.loop()
 	}
 }
@@ -519,7 +498,7 @@ func (p *Pool[I, O, C]) StopAndWait() {
 	}
 	p.stoppedWorkersMu.Lock()
 	defer p.stoppedWorkersMu.Unlock()
-	p.stoppedWorkers = nil
+	p.stoppedWorkers.buffer = nil
 }
 
 // ConnectPools starts a goroutine that reads the results of the first pool,
@@ -608,8 +587,8 @@ func (w *worker[I, O, C]) loop() {
 		// save this worker to w.pool.stoppedWorkers
 		w.pool.stoppedWorkersMu.Lock()
 		defer w.pool.stoppedWorkersMu.Unlock()
-		if w.pool.stoppedWorkers != nil { // might have been set to nil by pool.StopAndWait()
-			w.pool.stoppedWorkers[w.id] = w
+		if w.pool.stoppedWorkers.buffer != nil { // might have been set to nil by pool.StopAndWait()
+			ringPush(&w.pool.stoppedWorkers, w)
 		}
 
 		w.pool.wgWorkers.Done()
