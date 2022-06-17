@@ -484,10 +484,13 @@ func (p *Pool[I, O, C]) StopAndWait() {
 	p.cancelWorkers()
 	close(p.jobsDone)
 	if p.loggerDebug != nil {
+		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for pool loop to finish")
+	}
+	<-p.loopDone
+	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for all workers to finish")
 	}
 	p.wgWorkers.Wait()
-	<-p.loopDone
 	close(p.disableWorker)
 	close(p.concurrencyIs0)
 	if p.loggerDebug != nil {
