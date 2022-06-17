@@ -32,7 +32,6 @@ type Pool[I, O, C any] struct {
 	fixedWorkers     bool
 	retries          int
 	reinitDelay      time.Duration
-	idleTimeout      time.Duration
 	targetLoad       float64
 	name             string
 	loggerInfo       *log.Logger
@@ -102,7 +101,6 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 		maxActiveWorkers: numOfWorkers,
 		retries:          1,
 		reinitDelay:      time.Second,
-		idleTimeout:      20 * time.Second,
 		targetLoad:       0.9,
 	}
 	for _, option := range options {
@@ -139,7 +137,6 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 	p := Pool[I, O, C]{
 		retries:          config.retries,
 		reinitDelay:      config.reinitDelay,
-		idleTimeout:      config.idleTimeout,
 		targetLoad:       config.targetLoad,
 		name:             config.name,
 		loggerInfo:       loggerInfo,
@@ -534,7 +531,6 @@ type worker[I, O, C any] struct {
 	pool       *Pool[I, O, C]
 	ctx        context.Context
 	connection *C
-	idleTicker *time.Ticker
 }
 
 func newWorker[I, O, C any](p *Pool[I, O, C], id int, ctx context.Context) *worker[I, O, C] {
@@ -548,9 +544,6 @@ func newWorker[I, O, C any](p *Pool[I, O, C], id int, ctx context.Context) *work
 func (w *worker[I, O, C]) loop() {
 	enabled := false
 	deinit := func() {
-		if w.idleTicker != nil {
-			w.idleTicker.Stop()
-		}
 		if enabled {
 			enabled = false
 			atomic.AddInt32(&w.pool.concurrency, -1)
@@ -627,17 +620,9 @@ func (w *worker[I, O, C]) loop() {
 	} else {
 		w.connection = new(C)
 	}
-	if !w.pool.fixedWorkers {
-		w.idleTicker = time.NewTicker(w.pool.idleTimeout)
-	} else {
-		neverTickingTicker := time.Ticker{C: make(chan time.Time)}
-		w.idleTicker = &neverTickingTicker
-	}
 
 	for {
 		select {
-		case <-w.idleTicker.C:
-			return
 		case <-w.ctx.Done():
 			return
 		case _, ok := <-w.pool.disableWorker:
@@ -648,9 +633,6 @@ func (w *worker[I, O, C]) loop() {
 		case j, ok := <-w.pool.jobsQueue:
 			if !ok {
 				return
-			}
-			if !w.pool.fixedWorkers {
-				w.idleTicker.Stop()
 			}
 			// run job
 			atomic.AddInt32(&w.pool.nJobsProcessing, 1)
@@ -677,9 +659,6 @@ func (w *worker[I, O, C]) loop() {
 					sleepCtx(w.ctx, pauseDuration)
 					return
 				}
-			}
-			if !w.pool.fixedWorkers {
-				w.idleTicker.Reset(w.pool.idleTimeout)
 			}
 		}
 	}

@@ -15,7 +15,6 @@ type poolConfig struct {
 	maxActiveWorkers int
 	retries          int
 	reinitDelay      time.Duration
-	idleTimeout      time.Duration
 	targetLoad       float64
 	name             string
 	loggerInfo       *log.Logger
@@ -28,7 +27,6 @@ const (
 	optionMaxActiveWorkers
 	optionRetries
 	optionReinitDelay
-	optionIdleTimeout
 	optionTargetLoad
 	optionName
 	optionLoggerInfo
@@ -71,15 +69,6 @@ func ReinitDelay(d time.Duration) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.reinitDelay = d
 		c.setOptions[optionReinitDelay] = struct{}{}
-		return nil
-	}
-}
-
-// IdleTimeout sets the time duration after which an idle worker is stopped.
-func IdleTimeout(d time.Duration) func(c *poolConfig) error {
-	return func(c *poolConfig) error {
-		c.idleTimeout = d
-		c.setOptions[optionIdleTimeout] = struct{}{}
 		return nil
 	}
 }
