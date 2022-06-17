@@ -676,7 +676,7 @@ func (w *worker[I, O, C]) loop() {
 				}
 			}
 			if !w.pool.fixedWorkers {
-				w.idleTicker = time.NewTicker(w.pool.idleTimeout)
+				w.idleTicker.Reset(w.pool.idleTimeout)
 			}
 		}
 	}
