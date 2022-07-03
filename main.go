@@ -55,10 +55,12 @@ type Pool[I, O, C any] struct {
 	// NewPoolSimple() or NewPoolWithInit(),
 	// this channel is nil.
 	Results          chan Result[I, O]
+	enableWorker     chan int
 	disableWorker    chan struct{}
 	monitor          func(s stats)
 	cancelWorkers    context.CancelFunc
 	loopDone         chan struct{}
+	enableLoopDone   chan struct{}
 	stoppedWorkers   ring[*worker[I, O, C]]
 	stoppedWorkersMu sync.Mutex
 }
@@ -166,14 +168,17 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 		p.Results = make(chan Result[I, O], p.maxActiveWorkers)
 	}
 	p.concurrencyIs0 = make(chan struct{}, 1)
+	p.enableWorker = make(chan int, p.maxActiveWorkers)
 	p.disableWorker = make(chan struct{}, p.maxActiveWorkers)
 	p.stoppedWorkers = newRing[*worker[I, O, C]](p.numOfWorkers)
 	p.loopDone = make(chan struct{})
+	p.enableLoopDone = make(chan struct{})
 	for i := 0; i < p.numOfWorkers; i++ {
 		w := newWorker(&p, i, ctxWorkers)
 		ringPush(&p.stoppedWorkers, w)
 	}
 	p.stoppedWorkers.Shuffle()
+	go p.enableWorkersLoop()
 	go p.loop()
 	return &p, nil
 }
@@ -413,6 +418,15 @@ func (p *Pool[I, O, C]) loop() {
 }
 
 func (p *Pool[I, O, C]) disableWorkers(n int32) {
+	// drain p.enableWorker channel
+loop:
+	for {
+		select {
+		case <-p.enableWorker:
+		default:
+			break loop
+		}
+	}
 	// try to disable n workers
 	for i := int32(0); i < n; i++ {
 		select {
@@ -432,7 +446,21 @@ loop:
 			break loop
 		}
 	}
+	// try to enable n workers
+	select {
+	case p.enableWorker <- int(n):
+	default:
+	}
+}
 
+func (p *Pool[I, O, C]) enableWorkersLoop() {
+	for n := range p.enableWorker {
+		p.enableWorkers2(n)
+	}
+	p.enableLoopDone <- struct{}{}
+}
+
+func (p *Pool[I, O, C]) enableWorkers2(n int) {
 	p.stoppedWorkersMu.Lock()
 	defer p.stoppedWorkersMu.Unlock()
 
@@ -441,16 +469,16 @@ loop:
 	}
 
 	concurrency := p.numOfWorkers - p.stoppedWorkers.Count
-	if concurrency+int(n) > p.maxActiveWorkers {
-		n = int32(p.maxActiveWorkers - concurrency)
+	if concurrency+n > p.maxActiveWorkers {
+		n = p.maxActiveWorkers - concurrency
 	}
 
 	if n <= 0 {
 		return
 	}
 
-	workersToStart := make([]*worker[I, O, C], 0, int(n))
-	for i := 0; i < int(n); i++ {
+	workersToStart := make([]*worker[I, O, C], 0, n)
+	for i := 0; i < n; i++ {
 		w, ok := ringPop(&p.stoppedWorkers)
 		if !ok {
 			break
@@ -489,6 +517,11 @@ func (p *Pool[I, O, C]) StopAndWait() {
 	}
 	p.wgWorkers.Wait()
 	close(p.disableWorker)
+	close(p.enableWorker)
+	if p.loggerDebug != nil {
+		p.loggerDebug.Println("[workerpool/StopAndWait] waiting for enableWorkersLoop to finish")
+	}
+	<-p.enableLoopDone
 	close(p.concurrencyIs0)
 	if p.loggerDebug != nil {
 		p.loggerDebug.Println("[workerpool/StopAndWait] finished")
