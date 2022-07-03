@@ -113,10 +113,6 @@ func (err errorTypePauseWorker) Unwrap() error {
 	return err.Err
 }
 
-func (err errorTypePauseWorker) Retryable() bool {
-	return true
-}
-
 func (err errorTypePauseWorker) PauseWorker() time.Duration {
 	return err.duration
 }
