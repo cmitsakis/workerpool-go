@@ -436,10 +436,12 @@ loop:
 }
 
 func (p *Pool[I, O, C]) enableWorkersLoop() {
+	defer func() {
+		p.enableLoopDone <- struct{}{}
+	}()
 	for n := range p.enableWorker {
 		p.enableWorkers2(n)
 	}
-	p.enableLoopDone <- struct{}{}
 }
 
 func (p *Pool[I, O, C]) enableWorkers2(n int) {
