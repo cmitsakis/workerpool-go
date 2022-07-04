@@ -176,7 +176,7 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 		ringPush(&p.stoppedWorkers, w)
 	}
 	p.stoppedWorkers.Shuffle()
-	go p.enableWorkersLoop()
+	go p.enableWorkersLoop(ctxWorkers)
 	go p.loop()
 	return &p, nil
 }
@@ -435,12 +435,20 @@ loop:
 	}
 }
 
-func (p *Pool[I, O, C]) enableWorkersLoop() {
+func (p *Pool[I, O, C]) enableWorkersLoop(ctx context.Context) {
 	defer func() {
 		p.enableLoopDone <- struct{}{}
 	}()
-	for n := range p.enableWorker {
-		p.enableWorkers2(n)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case n, ok := <-p.enableWorker:
+			if !ok {
+				return
+			}
+			p.enableWorkers2(n)
+		}
 	}
 }
 
