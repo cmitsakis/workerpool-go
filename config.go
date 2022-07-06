@@ -10,21 +10,25 @@ import (
 )
 
 type poolConfig struct {
-	setOptions       map[int]struct{}
-	fixedWorkers     bool
-	maxActiveWorkers int
-	retries          int
-	reinitDelay      time.Duration
-	targetLoad       float64
-	name             string
-	loggerInfo       *log.Logger
-	loggerDebug      *log.Logger
-	monitor          func(s stats)
+	setOptions               map[int]struct{}
+	fixedWorkers             bool
+	workerStopAfterNumOfJobs int
+	workerStopDurMultiplier  float64
+	maxActiveWorkers         int
+	retries                  int
+	reinitDelay              time.Duration
+	targetLoad               float64
+	name                     string
+	loggerInfo               *log.Logger
+	loggerDebug              *log.Logger
+	monitor                  func(s stats)
 }
 
 const (
 	optionFixedWorkers = iota
 	optionMaxActiveWorkers
+	optionStopWorkerAfterNumOfJobs
+	optionStopWorkerAfterNumOfJobsFor
 	optionRetries
 	optionReinitDelay
 	optionTargetLoad
@@ -49,6 +53,33 @@ func MaxActiveWorkers(n int) func(c *poolConfig) error {
 	return func(c *poolConfig) error {
 		c.maxActiveWorkers = n
 		c.setOptions[optionMaxActiveWorkers] = struct{}{}
+		return nil
+	}
+}
+
+// StopWorkerAfterNumOfJobs stops workers once they process numOfJobs jobs.
+// Stopped workers will be restarted when they are needed.
+func StopWorkerAfterNumOfJobs(numOfJobs int) func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		c.workerStopAfterNumOfJobs = numOfJobs
+		c.setOptions[optionStopWorkerAfterNumOfJobs] = struct{}{}
+		if _, set := c.setOptions[optionStopWorkerAfterNumOfJobsFor]; set {
+			return fmt.Errorf("options StopWorkerAfterNumOfJobs() and StopWorkerAfterNumOfJobsFor() are incompatible")
+		}
+		return nil
+	}
+}
+
+// StopWorkerAfterNumOfJobsFor stops workers once they process numOfJobs jobs.
+// Workers will remain stopped for at least the time they were active multiplied by stopDurationMultiplier.
+func StopWorkerAfterNumOfJobsFor(numOfJobs int, stopDurationMultiplier float64) func(c *poolConfig) error {
+	return func(c *poolConfig) error {
+		c.workerStopAfterNumOfJobs = numOfJobs
+		c.workerStopDurMultiplier = stopDurationMultiplier
+		c.setOptions[optionStopWorkerAfterNumOfJobsFor] = struct{}{}
+		if _, set := c.setOptions[optionStopWorkerAfterNumOfJobs]; set {
+			return fmt.Errorf("options StopWorkerAfterNumOfJobs() and StopWorkerAfterNumOfJobsFor() are incompatible")
+		}
 		return nil
 	}
 }

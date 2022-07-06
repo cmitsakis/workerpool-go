@@ -27,25 +27,27 @@ type Result[I, O any] struct {
 }
 
 type Pool[I, O, C any] struct {
-	numOfWorkers     int
-	maxActiveWorkers int
-	fixedWorkers     bool
-	retries          int
-	reinitDelay      time.Duration
-	targetLoad       float64
-	name             string
-	loggerInfo       *log.Logger
-	loggerDebug      *log.Logger
-	handler          func(job Job[I], workerID int, connection C) (O, error)
-	workerInit       func(workerID int) (C, error)
-	workerDeinit     func(workerID int, connection C) error
-	concurrency      int32
-	jobsNew          chan I
-	jobsQueue        chan Job[I]
-	wgJobs           sync.WaitGroup
-	wgWorkers        sync.WaitGroup
-	nJobsProcessing  int32
-	jobsDone         chan Result[I, O]
+	numOfWorkers             int
+	maxActiveWorkers         int
+	fixedWorkers             bool
+	workerStopAfterNumOfJobs int
+	workerStopDurMultiplier  float64
+	retries                  int
+	reinitDelay              time.Duration
+	targetLoad               float64
+	name                     string
+	loggerInfo               *log.Logger
+	loggerDebug              *log.Logger
+	handler                  func(job Job[I], workerID int, connection C) (O, error)
+	workerInit               func(workerID int) (C, error)
+	workerDeinit             func(workerID int, connection C) error
+	concurrency              int32
+	jobsNew                  chan I
+	jobsQueue                chan Job[I]
+	wgJobs                   sync.WaitGroup
+	wgWorkers                sync.WaitGroup
+	nJobsProcessing          int32
+	jobsDone                 chan Result[I, O]
 	// If the pool is created by the constructors
 	// NewPoolWithResults() or NewPoolWithResultsAndInit(),
 	// results are written to this channel,
@@ -136,20 +138,22 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 	ctxWorkers, cancelWorkers := context.WithCancel(context.Background())
 
 	p := Pool[I, O, C]{
-		retries:          config.retries,
-		reinitDelay:      config.reinitDelay,
-		targetLoad:       config.targetLoad,
-		name:             config.name,
-		loggerInfo:       loggerInfo,
-		loggerDebug:      loggerDebug,
-		monitor:          config.monitor,
-		numOfWorkers:     numOfWorkers,
-		maxActiveWorkers: config.maxActiveWorkers,
-		fixedWorkers:     config.fixedWorkers,
-		handler:          handler,
-		workerInit:       workerInit,
-		workerDeinit:     workerDeinit,
-		cancelWorkers:    cancelWorkers,
+		retries:                  config.retries,
+		reinitDelay:              config.reinitDelay,
+		targetLoad:               config.targetLoad,
+		name:                     config.name,
+		loggerInfo:               loggerInfo,
+		loggerDebug:              loggerDebug,
+		monitor:                  config.monitor,
+		numOfWorkers:             numOfWorkers,
+		maxActiveWorkers:         config.maxActiveWorkers,
+		fixedWorkers:             config.fixedWorkers,
+		workerStopAfterNumOfJobs: config.workerStopAfterNumOfJobs,
+		workerStopDurMultiplier:  config.workerStopDurMultiplier,
+		handler:                  handler,
+		workerInit:               workerInit,
+		workerDeinit:             workerDeinit,
+		cancelWorkers:            cancelWorkers,
 	}
 	if p.numOfWorkers <= 0 {
 		return nil, fmt.Errorf("numOfWorkers <= 0")
@@ -641,7 +645,24 @@ func (w *worker[I, O, C]) loop() {
 		w.connection = new(C)
 	}
 
-	for {
+	started := time.Now()
+
+	for i := 0; ; i++ {
+		if w.pool.workerStopAfterNumOfJobs > 0 && i >= w.pool.workerStopAfterNumOfJobs {
+			// enable another worker so concurrency does not decrease
+			w.pool.enableWorkers(1)
+			if w.pool.workerStopDurMultiplier > 0 {
+				deinit()
+				dur := time.Duration(float64(time.Since(started)) * w.pool.workerStopDurMultiplier)
+				if w.pool.loggerDebug != nil {
+					w.pool.loggerDebug.Printf("[workerpool/worker%v] completed %v jobs. active for %v sleeping for %v before stopping\n", w.id, i, time.Since(started), dur)
+				}
+				sleepCtx(w.ctx, dur)
+			} else if w.pool.loggerDebug != nil {
+				w.pool.loggerDebug.Printf("[workerpool/worker%v] completed %v jobs. stopping\n", w.id, i)
+			}
+			return
+		}
 		select {
 		case <-w.ctx.Done():
 			return
