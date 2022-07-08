@@ -36,22 +36,30 @@ func TestExample(t *testing.T) {
 }
 
 func TestPoolCorrectness(t *testing.T) {
-	p, err := NewPoolWithResults(5, func(job Job[float64], workerID int) (float64, error) {
+	const maxActiveWorkers = 5
+	const stopWorkerAfterNumOfJobs = 5
+	const submittedCount = 100 // number of jobs to be submitted
+	const numOfWorkers = 2 * submittedCount / stopWorkerAfterNumOfJobs
+	p, err := NewPoolWithResults(numOfWorkers, func(job Job[float64], workerID int) (float64, error) {
 		// fail the first attempt only
 		if job.Attempt == 0 {
 			return 0, ErrorWrapRetryable(fmt.Errorf("failed"))
 		}
 		return math.Sqrt(job.Payload), nil
-	}, Retries(1), Name("p"), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
+	}, Retries(1), Name("p"), MaxActiveWorkers(maxActiveWorkers), StopWorkerAfterNumOfJobsFor(stopWorkerAfterNumOfJobs, 1e6), LoggerInfo(loggerIfDebugEnabled()), LoggerDebug(loggerIfDebugEnabled()))
 	if err != nil {
 		t.Errorf("[ERROR] failed to create pool p: %s", err)
 		return
 	}
 
-	const submittedCount = 100
+	started := time.Now()
+
 	go func() {
 		for i := 0; i < submittedCount; i++ {
 			p.Submit(float64(i))
+			if time.Since(started) > 100*time.Millisecond {
+				t.Errorf("[ERROR] time since started: %v", time.Since(started))
+			}
 		}
 		p.StopAndWait()
 	}()

@@ -62,8 +62,9 @@ type Pool[I, O, C any] struct {
 	cancelWorkers    context.CancelFunc
 	loopDone         chan struct{}
 	enableLoopDone   chan struct{}
+	sleepingWorkers  int
 	stoppedWorkers   ring[*worker[I, O, C]]
-	stoppedWorkersMu sync.Mutex
+	stoppedWorkersMu sync.Mutex // protects: stoppedWorkers and sleepingWorkers
 }
 
 // NewPoolSimple creates a new worker pool.
@@ -464,7 +465,7 @@ func (p *Pool[I, O, C]) enableWorkers2(n int) {
 		return
 	}
 
-	concurrency := p.numOfWorkers - p.stoppedWorkers.Count
+	concurrency := p.numOfWorkers - p.stoppedWorkers.Count - p.sleepingWorkers
 	if concurrency+n > p.maxActiveWorkers {
 		n = p.maxActiveWorkers - concurrency
 	}
@@ -571,6 +572,7 @@ func newWorker[I, O, C any](p *Pool[I, O, C], id int, ctx context.Context) *work
 
 func (w *worker[I, O, C]) loop() {
 	enabled := false
+	slept := false
 	deinit := func() {
 		if enabled {
 			enabled = false
@@ -600,6 +602,9 @@ func (w *worker[I, O, C]) loop() {
 		// save this worker to w.pool.stoppedWorkers
 		w.pool.stoppedWorkersMu.Lock()
 		defer w.pool.stoppedWorkersMu.Unlock()
+		if slept {
+			w.pool.sleepingWorkers--
+		}
 		if w.pool.stoppedWorkers.buffer != nil { // might have been set to nil by pool.StopAndWait()
 			ringPush(&w.pool.stoppedWorkers, w)
 			concurrency := atomic.LoadInt32(&w.pool.concurrency)
@@ -657,6 +662,11 @@ func (w *worker[I, O, C]) loop() {
 				if w.pool.loggerDebug != nil {
 					w.pool.loggerDebug.Printf("[workerpool/worker%v] completed %v jobs. active for %v sleeping for %v before stopping\n", w.id, i, time.Since(started), dur)
 				}
+
+				w.pool.stoppedWorkersMu.Lock()
+				w.pool.sleepingWorkers++
+				w.pool.stoppedWorkersMu.Unlock()
+				slept = true
 				sleepCtx(w.ctx, dur)
 			} else if w.pool.loggerDebug != nil {
 				w.pool.loggerDebug.Printf("[workerpool/worker%v] completed %v jobs. stopping\n", w.id, i)
@@ -697,6 +707,11 @@ func (w *worker[I, O, C]) loop() {
 					deinit()
 					// enable another worker so concurrency does not decrease
 					w.pool.enableWorkers(1)
+
+					w.pool.stoppedWorkersMu.Lock()
+					w.pool.sleepingWorkers++
+					w.pool.stoppedWorkersMu.Unlock()
+					slept = true
 					sleepCtx(w.ctx, pauseDuration)
 					return
 				}
