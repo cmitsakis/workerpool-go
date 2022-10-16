@@ -65,6 +65,8 @@ type Pool[I, O, C any] struct {
 	sleepingWorkers  int
 	stoppedWorkers   ring[*worker[I, O, C]]
 	stoppedWorkersMu sync.Mutex // protects: stoppedWorkers and sleepingWorkers
+	waitCtx          context.Context
+	waitCtxCancel    context.CancelFunc
 }
 
 // NewPoolSimple creates a new worker pool.
@@ -136,6 +138,7 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 		}
 	}
 
+	ctxActive, cancelActive := context.WithCancel(context.Background())
 	ctxWorkers, cancelWorkers := context.WithCancel(context.Background())
 
 	p := Pool[I, O, C]{
@@ -155,6 +158,8 @@ func newPool[I, O, C any](numOfWorkers int, handler func(job Job[I], workerID in
 		workerInit:               workerInit,
 		workerDeinit:             workerDeinit,
 		cancelWorkers:            cancelWorkers,
+		waitCtx:                  ctxActive,
+		waitCtxCancel:            cancelActive,
 	}
 	if p.numOfWorkers <= 0 {
 		return nil, fmt.Errorf("numOfWorkers <= 0")
@@ -528,6 +533,12 @@ func (p *Pool[I, O, C]) StopAndWait() {
 	p.stoppedWorkersMu.Lock()
 	defer p.stoppedWorkersMu.Unlock()
 	p.stoppedWorkers.buffer = nil
+	p.waitCtxCancel()
+}
+
+// Wait waits until the pool has been stopped by a call to StopAndWait()
+func (p *Pool[I, O, C]) Wait() {
+	<-p.waitCtx.Done()
 }
 
 // ConnectPools starts a goroutine that reads the results of the first pool,
