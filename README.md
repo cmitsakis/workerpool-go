@@ -44,7 +44,7 @@ Type `Pool[I, O, C any]` uses three type parameters:
 - `O`: output (result) type
 - `C`: type returned by the `workerInit()` function (e.g. a connection)
 
-You might not need all three type parameter so for convenience you can create a pool by using a constructor that hides some type parameters.
+You might not need all three type parameters so for convenience you can create a pool by using a constructor that hides some type parameters.
 That's why there are four constructors of increasing complexity:
 
 ```go
