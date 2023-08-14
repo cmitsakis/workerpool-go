@@ -24,17 +24,15 @@ If the rate of job submissions is constant, the number of active workers will qu
 
 ## Installation
 
-Requires Go 1.18
+Requires Go 1.18+
 
 ```sh
 go get go.mitsakis.org/workerpool
 ```
 
-## Documentation
+## API Reference
 
 <https://pkg.go.dev/go.mitsakis.org/workerpool>
-
-Under development. API is subject to change.
 
 ## Usage
 
