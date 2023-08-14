@@ -77,6 +77,56 @@ NewPoolWithResultsAndInit(
 	...)
 ```
 
+### Simple pool
+
+In the most simple case you create a pool (`p`), submit the job payloads, and then call `p.StopAndWait()` to signal that you are done submitting jobs.
+`StopAndWait()` blocks until all submitted jobs have run and workers have stopped.
+```go
+p, _ := workerpool.NewPoolSimple(...)
+for i := 0; i < 100; i++ {
+	p.Submit(i)
+}
+p.StopAndWait()
+```
+
+### Pool with results
+
+If you create a pool with results (using the constructors `NewPoolWithResults()` or `NewPoolWithResultsAndInit()`), the pool writes each job's result to the `p.Results` channel.
+
+**Warning:** You *must* read from `p.Results`. Submissions and reading from `p.Results` channel *must* happen concurrently (from different goroutines) otherwise there will be a deadlock.
+```go
+p, _ := workerpool.NewPoolWithResults(10, func(job workerpool.Job[float64], workerID int) (float64, error) {
+	return math.Sqrt(job.Payload), nil
+})
+go func() {
+	for i := 0; i < 100; i++ {
+		p.Submit(float64(i))
+	}
+	p.StopAndWait()
+}()
+for result := range p.Results {
+}
+```
+
+### Pool with worker init/deinit
+
+You can create a pool using the constructors `NewPoolWithInit()` or `NewPoolWithResultsAndInit()`, if you want each worker to:
+- run an `init()` function when it starts, and store the value returned by `init()`
+- run a `deinit()` when it stops
+
+This is useful, if you need each worker to have a connection or an external process.
+```go
+p, _ := workerpool.NewPoolWithInit(5, func(job workerpool.Job[string], workerID int, tr *http.Transport) error {
+    // handler function
+}, func(workerID int) (*http.Transport, error) { // init
+    return &http.Transport{}, nil
+}, func(workerID int, tr *http.Transport) error { // deinit
+    tr.CloseIdleConnections()
+})
+```
+
+Notice that the `http.Transport` created by the init function is accessible in the handler function as a parameter.
+
 ### Pipeline
 
 You can also connect pools of compatible type (results of `p1` are the same type as inputs to `p2`) into a pipeline by using the `ConnectPools(p1, p2, handleError)` function like this:
