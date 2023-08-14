@@ -135,6 +135,27 @@ workerpool.ConnectPools(p1, p2, func(result workerpool.Result[string, []byte]) {
 ```
 By connecting two pools, results of `p1` that have no error are submitted to `p2`, and those with an error are handled by the `handleError()` function.
 
+### Retrying failed jobs
+
+The pool will retry failed jobs, if in the handler function you wrap the error with `ErrorWrapRetryable()` like this:
+```go
+p, _ := workerpool.NewPoolSimple(4, func(job workerpool.Job[float64], workerID int) error {
+	...
+	if err != nil {
+		return workerpool.ErrorWrapRetryable(fmt.Errorf("error: %w", err))
+	}
+	return nil
+})
+```
+
+By default a failed job will be retried only once.
+You can increase the number of retries by creating a pool with `Retries()` like this:
+```go
+p, _ := workerpool.NewPoolSimple(4, func(job workerpool.Job[float64], workerID int) error {
+	...
+}, workerpool.Retries(3))
+```
+
 ### Examples
 
 #### Simple example
