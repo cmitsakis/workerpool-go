@@ -38,11 +38,15 @@ Under development. API is subject to change.
 
 ## Usage
 
+### Type parameters
+
 Type `Pool[I, O, C any]` uses three type parameters:
 
 - `I`: input (job payload) type
 - `O`: output (result) type
 - `C`: type returned by the `workerInit()` function (e.g. a connection)
+
+### Constructors
 
 You might not need all three type parameters so for convenience you can create a pool by using a constructor that hides some type parameters.
 That's why there are four constructors of increasing complexity:
@@ -73,6 +77,8 @@ NewPoolWithResultsAndInit(
 	...)
 ```
 
+### Pipeline
+
 You can also connect pools of compatible type (results of `p1` are the same type as inputs to `p2`) into a pipeline by using the `ConnectPools(p1, p2, handleError)` function like this:
 ```go
 workerpool.ConnectPools(p1, p2, func(result workerpool.Result[string, []byte]) {
@@ -81,7 +87,9 @@ workerpool.ConnectPools(p1, p2, func(result workerpool.Result[string, []byte]) {
 ```
 By connecting two pools, results of `p1` that have no error are submitted to `p2`, and those with an error are handled by the `handleError()` function.
 
-### Simple example
+### Examples
+
+#### Simple example
 ```go
 package main
 
@@ -105,7 +113,7 @@ func main() {
 }
 ```
 
-### Pipeline example
+#### Pipeline example
 
 A more complicated example with three pools connected into a pipeline.
 ```go
@@ -151,7 +159,7 @@ func main() {
 }
 ```
 
-### Crawler pipeline example
+#### Crawler pipeline example
 
 A real world example with two pools.
 The first pool (p1) downloads URLs and the second (p2) processes the downloaded documents.
